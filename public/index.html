@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Social Media Automation</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1><span>AI</span> Social Media Automation</h1>
+      <button class="btn btn-sm" onclick="loadPosts()" title="Refresh">Refresh</button>
+    </header>
+
+    <!-- Generate Section -->
+    <section class="generate-section">
+      <h2>Create New Post</h2>
+      <div class="form-group">
+        <label>Prompt</label>
+        <textarea id="prompt" placeholder="Describe your post idea... (e.g. 'Tips for productive remote work')"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Platforms</label>
+        <div class="platform-checks">
+          <label><input type="checkbox" name="platform" value="instagram" checked><span>Instagram</span></label>
+          <label><input type="checkbox" name="platform" value="facebook"><span>Facebook</span></label>
+          <label><input type="checkbox" name="platform" value="linkedin"><span>LinkedIn</span></label>
+        </div>
+      </div>
+      <button class="btn btn-primary" id="generateBtn" onclick="generatePost()">Generate with AI</button>
+    </section>
+
+    <!-- Preview Section -->
+    <section class="preview-card" id="preview">
+      <h2>Preview & Edit</h2>
+      <div class="preview-content">
+        <div class="preview-image">
+          <img id="previewImg" src="" alt="Generated image">
+        </div>
+        <div class="preview-text">
+          <div class="field">
+            <div class="field-label">Caption</div>
+            <div class="editable" id="previewCaption" contenteditable="true"></div>
+          </div>
+          <div class="field">
+            <div class="field-label">Hashtags</div>
+            <div class="editable" id="previewHashtags" contenteditable="true"></div>
+          </div>
+          <div class="field">
+            <div class="field-label">Schedule (leave empty for draft)</div>
+            <input type="datetime-local" id="scheduleTime">
+          </div>
+          <div class="btn-group">
+            <button class="btn btn-primary" onclick="savePost()">Save Draft</button>
+            <button class="btn btn-warning" onclick="scheduleCurrentPost()">Schedule</button>
+            <button class="btn btn-success" onclick="publishNow()">Publish Now</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Posts List -->
+    <section class="posts-section">
+      <h2>Your Posts</h2>
+      <div id="postsList"><div class="loading">Loading posts...</div></div>
+    </section>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const API = '/api/posts';
+    let currentPostId = null;
+
+    // Generate post
+    async function generatePost() {
+      const prompt = document.getElementById('prompt').value.trim();
+      if (!prompt) return showToast('Please enter a prompt', 'error');
+
+      const platforms = [...document.querySelectorAll('input[name="platform"]:checked')].map(c => c.value);
+      if (!platforms.length) return showToast('Select at least one platform', 'error');
+
+      const btn = document.getElementById('generateBtn');
+      btn.disabled = true;
+      btn.textContent = 'Generating...';
+
+      try {
+        const res = await fetch(`${API}/generate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt, platforms })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+
+        currentPostId = data.id;
+        document.getElementById('previewImg').src = data.driveUrl || data.imageUrl;
+        document.getElementById('previewCaption').textContent = data.caption;
+        document.getElementById('previewHashtags').textContent = data.hashtags;
+        document.getElementById('preview').classList.add('active');
+        showToast('Content generated!', 'success');
+        loadPosts();
+      } catch (err) {
+        showToast(err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Generate with AI';
+      }
+    }
+
+    // Save draft updates
+    async function savePost() {
+      if (!currentPostId) return;
+      const caption = document.getElementById('previewCaption').textContent;
+      const hashtags = document.getElementById('previewHashtags').textContent;
+
+      try {
+        await fetch(`${API}/${currentPostId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ caption, hashtags })
+        });
+        showToast('Draft saved', 'success');
+        loadPosts();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    // Schedule
+    async function scheduleCurrentPost() {
+      if (!currentPostId) return;
+      const time = document.getElementById('scheduleTime').value;
+      if (!time) return showToast('Select a date and time', 'error');
+
+      await savePost();
+
+      try {
+        const res = await fetch(`${API}/${currentPostId}/schedule`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scheduledAt: new Date(time).toISOString() })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        showToast('Post scheduled!', 'success');
+        loadPosts();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    // Publish now
+    async function publishNow() {
+      if (!currentPostId) return;
+      if (!confirm('Publish this post to all selected platforms now?')) return;
+
+      await savePost();
+
+      try {
+        const res = await fetch(`${API}/${currentPostId}/publish`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        showToast('Published!', 'success');
+        loadPosts();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    // Load posts list
+    async function loadPosts() {
+      try {
+        const res = await fetch(API);
+        const posts = await res.json();
+        const container = document.getElementById('postsList');
+
+        if (!posts.length) {
+          container.innerHTML = '<div class="loading">No posts yet. Generate your first one!</div>';
+          return;
+        }
+
+        container.innerHTML = posts.map(p => `
+          <div class="post-card">
+            <img src="${p.drive_url || p.image_url || ''}" alt="" onerror="this.style.display='none'">
+            <div class="post-info">
+              <div class="post-caption">${escapeHtml(p.caption || p.prompt)}</div>
+              <div class="post-meta">
+                ${p.platforms.join(', ')}
+                ${p.scheduled_at ? ' &middot; ' + new Date(p.scheduled_at).toLocaleString('tr-TR') : ''}
+                &middot; ${new Date(p.created_at).toLocaleDateString('tr-TR')}
+              </div>
+            </div>
+            <span class="status-badge status-${p.status}">${p.status}</span>
+            <div class="btn-group">
+              ${p.status === 'draft' ? `<button class="btn btn-success btn-sm" onclick="quickPublish('${p.id}')">Publish</button>` : ''}
+              <button class="btn btn-danger btn-sm" onclick="deletePost('${p.id}')">Delete</button>
+            </div>
+          </div>
+        `).join('');
+      } catch (err) {
+        document.getElementById('postsList').innerHTML = '<div class="loading">Failed to load posts</div>';
+      }
+    }
+
+    async function quickPublish(id) {
+      if (!confirm('Publish this post now?')) return;
+      try {
+        const res = await fetch(`${API}/${id}/publish`, { method: 'POST' });
+        if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
+        showToast('Published!', 'success');
+        loadPosts();
+      } catch (err) { showToast(err.message, 'error'); }
+    }
+
+    async function deletePost(id) {
+      if (!confirm('Delete this post?')) return;
+      await fetch(`${API}/${id}`, { method: 'DELETE' });
+      if (currentPostId === id) {
+        currentPostId = null;
+        document.getElementById('preview').classList.remove('active');
+      }
+      loadPosts();
+    }
+
+    function showToast(msg, type = 'success') {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.className = `toast ${type} show`;
+      setTimeout(() => t.classList.remove('show'), 3000);
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    // Init
+    loadPosts();
+  </script>
+</body>
+</html>

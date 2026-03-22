@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "social-media-app",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["src/app.js"],
+      "port": 3000
+    }
+  ]
+}

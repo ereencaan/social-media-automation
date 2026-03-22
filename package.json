@@ -1,0 +1,26 @@
+{
+  "name": "social-media-automation",
+  "version": "1.0.0",
+  "description": "AI-powered social media content generation and scheduling",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "nodemon src/app.js"
+  },
+  "keywords": ["social-media", "automation", "dall-e", "claude", "instagram", "linkedin", "facebook"],
+  "author": "ereencaan",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "sql.js": "^1.11.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "googleapis": "^144.0.0",
+    "node-cron": "^3.0.3",
+    "openai": "^4.77.0",
+    "uuid": "^11.0.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}
