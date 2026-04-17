@@ -4,3 +4,9 @@ storage/
 *.db
 .DS_Store
 Thumbs.db
+
+# Local dev / secrets (never commit)
+/.claude/
+/.mcp.json
+/config/
+

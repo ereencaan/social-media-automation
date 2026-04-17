@@ -13,13 +13,88 @@
       <button class="btn btn-sm" onclick="loadPosts()" title="Refresh">Refresh</button>
     </header>
 
+    <!-- Brand Settings -->
+    <section class="brand-section">
+      <div class="brand-header" onclick="toggleBrand()">
+        <h2>Brand Settings</h2>
+        <span id="brandToggle">+</span>
+      </div>
+      <div class="brand-body" id="brandBody" style="display:none">
+        <div class="brand-grid">
+          <div class="brand-logo-area">
+            <label>Logo</label>
+            <div class="logo-dropzone" id="logoDropzone"
+                 ondrop="handleLogoDrop(event)" ondragover="event.preventDefault()">
+              <img id="logoPreview" src="" style="display:none; max-width:120px; border-radius:8px;">
+              <span id="logoText">Drop logo here or click to upload</span>
+              <input type="file" id="logoInput" accept="image/*" style="display:none" onchange="uploadLogo(this.files[0])">
+            </div>
+            <button class="btn btn-danger btn-sm" onclick="removeLogo()" style="margin-top:8px" id="removeLogoBtn" hidden>Remove Logo</button>
+          </div>
+          <div class="brand-fields">
+            <div class="brand-field">
+              <label>Phone</label>
+              <input type="text" id="brandPhone" placeholder="+44 7407 040008">
+            </div>
+            <div class="brand-field">
+              <label>Website</label>
+              <input type="text" id="brandWebsite" placeholder="hitratech.co.uk">
+            </div>
+            <div class="brand-field">
+              <label>WhatsApp</label>
+              <input type="text" id="brandWhatsapp" placeholder="+44 7407 040008">
+            </div>
+            <div class="brand-field">
+              <label>Instagram</label>
+              <input type="text" id="brandInstagram" placeholder="hitratech">
+            </div>
+            <div class="brand-field">
+              <label>Facebook</label>
+              <input type="text" id="brandFacebook" placeholder="hitratech">
+            </div>
+            <div class="brand-field">
+              <label>LinkedIn</label>
+              <input type="text" id="brandLinkedin" placeholder="hitratech">
+            </div>
+            <div class="brand-field">
+              <label>Logo Position</label>
+              <select id="brandPosition">
+                <option value="bottom-right">Bottom Right</option>
+                <option value="bottom-left">Bottom Left</option>
+                <option value="top-right">Top Right</option>
+                <option value="top-left">Top Left</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="saveBrandSettings()" style="margin-top:16px">Save Brand Settings</button>
+      </div>
+    </section>
+
     <!-- Generate Section -->
     <section class="generate-section">
       <h2>Create New Post</h2>
+
+      <!-- Content Type Toggle -->
+      <div class="mode-toggle">
+        <button class="mode-btn active" id="modeImage" onclick="setContentType('image')">Image Post</button>
+        <button class="mode-btn" id="modeVideo" onclick="setContentType('video')">Video / Reel</button>
+      </div>
+
+      <!-- Video Duration (hidden by default) -->
+      <div class="form-group video-only" style="display:none">
+        <label>Video Duration</label>
+        <div class="format-checks">
+          <label><input type="radio" name="duration" value="5" checked><span>5 seconds</span></label>
+          <label><input type="radio" name="duration" value="10"><span>10 seconds</span></label>
+        </div>
+      </div>
+
       <div class="form-group">
         <label>Prompt</label>
-        <textarea id="prompt" placeholder="Describe your post idea... (e.g. 'Tips for productive remote work')"></textarea>
+        <textarea id="prompt" placeholder="Describe your post idea... (e.g. 'Ramazan Bayrami kutlama postu - yazilim sirketi')"></textarea>
       </div>
+
       <div class="form-group">
         <label>Platforms</label>
         <div class="platform-checks">
@@ -28,7 +103,7 @@
           <label><input type="checkbox" name="platform" value="linkedin"><span>LinkedIn</span></label>
         </div>
       </div>
-      <button class="btn btn-primary" id="generateBtn" onclick="generatePost()">Generate with AI</button>
+      <button class="btn btn-primary" id="generateBtn" onclick="generatePost()">Generate Image Post</button>
     </section>
 
     <!-- Preview Section -->
@@ -36,7 +111,8 @@
       <h2>Preview & Edit</h2>
       <div class="preview-content">
         <div class="preview-image">
-          <img id="previewImg" src="" alt="Generated image">
+          <img id="previewImg" src="" alt="Generated content">
+          <video id="previewVideo" controls style="display:none; width:100%; border-radius:8px;"></video>
         </div>
         <div class="preview-text">
           <div class="field">
@@ -72,12 +148,23 @@
   <script>
     const API = '/api/posts';
     let currentPostId = null;
+    let contentType = 'image';
+
+    // Content type toggle
+    function setContentType(type) {
+      contentType = type;
+      document.getElementById('modeImage').classList.toggle('active', type === 'image');
+      document.getElementById('modeVideo').classList.toggle('active', type === 'video');
+
+      document.querySelectorAll('.video-only').forEach(el => el.style.display = type === 'video' ? 'block' : 'none');
+
+      const btn = document.getElementById('generateBtn');
+      btn.textContent = type === 'image' ? 'Generate Image Post' : 'Generate Video / Reel';
+    }
 
     // Generate post
     async function generatePost() {
       const prompt = document.getElementById('prompt').value.trim();
-      if (!prompt) return showToast('Please enter a prompt', 'error');
-
       const platforms = [...document.querySelectorAll('input[name="platform"]:checked')].map(c => c.value);
       if (!platforms.length) return showToast('Select at least one platform', 'error');
 
@@ -86,16 +173,37 @@
       btn.textContent = 'Generating...';
 
       try {
-        const res = await fetch(`${API}/generate`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt, platforms })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
+        if (!prompt) return showToast('Please enter a prompt', 'error');
+        let data;
+
+        if (contentType === 'video') {
+          const duration = parseInt(document.querySelector('input[name="duration"]:checked').value);
+          const res = await fetch(`${API}/generate-video`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt, platforms, duration })
+          });
+          data = await res.json();
+          if (!res.ok) throw new Error(data.error);
+
+          document.getElementById('previewImg').style.display = 'none';
+          document.getElementById('previewVideo').style.display = 'block';
+          document.getElementById('previewVideo').src = data.driveUrl || data.imageUrl;
+        } else {
+          const res = await fetch(`${API}/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt, platforms })
+          });
+          data = await res.json();
+          if (!res.ok) throw new Error(data.error);
+
+          document.getElementById('previewImg').style.display = 'block';
+          document.getElementById('previewVideo').style.display = 'none';
+          document.getElementById('previewImg').src = data.driveUrl || data.imageUrl;
+        }
 
         currentPostId = data.id;
-        document.getElementById('previewImg').src = data.driveUrl || data.imageUrl;
         document.getElementById('previewCaption').textContent = data.caption;
         document.getElementById('previewHashtags').textContent = data.hashtags;
         document.getElementById('preview').classList.add('active');
@@ -105,7 +213,7 @@
         showToast(err.message, 'error');
       } finally {
         btn.disabled = false;
-        btn.textContent = 'Generate with AI';
+        btn.textContent = contentType === 'image' ? 'Generate Image Post' : 'Generate Video / Reel';
       }
     }
 
@@ -237,6 +345,89 @@
       div.textContent = str;
       return div.innerHTML;
     }
+
+    // Brand Settings
+    function toggleBrand() {
+      const body = document.getElementById('brandBody');
+      const toggle = document.getElementById('brandToggle');
+      const visible = body.style.display !== 'none';
+      body.style.display = visible ? 'none' : 'block';
+      toggle.textContent = visible ? '+' : '-';
+      if (!visible) loadBrandSettings();
+    }
+
+    async function loadBrandSettings() {
+      try {
+        const res = await fetch('/api/brand');
+        const b = await res.json();
+        if (b.logo_url) {
+          document.getElementById('logoPreview').src = b.logo_url;
+          document.getElementById('logoPreview').style.display = 'block';
+          document.getElementById('logoText').style.display = 'none';
+          document.getElementById('removeLogoBtn').hidden = false;
+        }
+        document.getElementById('brandPhone').value = b.phone || '';
+        document.getElementById('brandWebsite').value = b.website || '';
+        document.getElementById('brandWhatsapp').value = b.whatsapp || '';
+        document.getElementById('brandInstagram').value = b.instagram_handle || '';
+        document.getElementById('brandFacebook').value = b.facebook_handle || '';
+        document.getElementById('brandLinkedin').value = b.linkedin_handle || '';
+        document.getElementById('brandPosition').value = b.overlay_position || 'bottom-right';
+      } catch (err) { console.error('Failed to load brand:', err); }
+    }
+
+    async function saveBrandSettings() {
+      try {
+        await fetch('/api/brand', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            phone: document.getElementById('brandPhone').value,
+            website: document.getElementById('brandWebsite').value,
+            whatsapp: document.getElementById('brandWhatsapp').value,
+            instagram_handle: document.getElementById('brandInstagram').value,
+            facebook_handle: document.getElementById('brandFacebook').value,
+            linkedin_handle: document.getElementById('brandLinkedin').value,
+            overlay_position: document.getElementById('brandPosition').value
+          })
+        });
+        showToast('Brand settings saved!', 'success');
+      } catch (err) { showToast(err.message, 'error'); }
+    }
+
+    function handleLogoDrop(e) {
+      e.preventDefault();
+      const file = e.dataTransfer.files[0];
+      if (file && file.type.startsWith('image/')) uploadLogo(file);
+    }
+
+    async function uploadLogo(file) {
+      const form = new FormData();
+      form.append('logo', file);
+      try {
+        const res = await fetch('/api/brand/logo', { method: 'POST', body: form });
+        const b = await res.json();
+        if (b.logo_url) {
+          document.getElementById('logoPreview').src = b.logo_url;
+          document.getElementById('logoPreview').style.display = 'block';
+          document.getElementById('logoText').style.display = 'none';
+          document.getElementById('removeLogoBtn').hidden = false;
+          showToast('Logo uploaded!', 'success');
+        }
+      } catch (err) { showToast(err.message, 'error'); }
+    }
+
+    async function removeLogo() {
+      await fetch('/api/brand/logo', { method: 'DELETE' });
+      document.getElementById('logoPreview').style.display = 'none';
+      document.getElementById('logoText').style.display = 'block';
+      document.getElementById('removeLogoBtn').hidden = true;
+      showToast('Logo removed', 'success');
+    }
+
+    document.getElementById('logoDropzone').addEventListener('click', () => {
+      document.getElementById('logoInput').click();
+    });
 
     // Init
     loadPosts();

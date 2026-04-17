@@ -23,7 +23,7 @@ async function generateImage(prompt, platform = 'default') {
 
   const response = await client.images.generate({
     model: 'dall-e-3',
-    prompt: `Social media post image: ${prompt}. Professional, clean, eye-catching design suitable for ${platform}.`,
+    prompt: `Social media post image: ${prompt}. Professional, clean, eye-catching design suitable for ${platform}. IMPORTANT: Do NOT include any text, words, letters, or typography in the image. Pure visual design only, no text overlays.`,
     n: 1,
     size,
     quality: 'hd'

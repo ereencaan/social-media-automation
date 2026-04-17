@@ -7,17 +7,31 @@
     "start": "node src/app.js",
     "dev": "nodemon src/app.js"
   },
-  "keywords": ["social-media", "automation", "dall-e", "claude", "instagram", "linkedin", "facebook"],
+  "keywords": [
+    "social-media",
+    "automation",
+    "dall-e",
+    "claude",
+    "instagram",
+    "linkedin",
+    "facebook"
+  ],
   "author": "ereencaan",
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
-    "sql.js": "^1.11.0",
+    "@runwayml/sdk": "^3.18.0",
+    "bcryptjs": "^3.0.3",
+    "cloudinary": "^2.9.0",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "express-session": "^1.19.0",
     "googleapis": "^144.0.0",
+    "jimp": "^0.22.12",
+    "multer": "^2.1.1",
     "node-cron": "^3.0.3",
     "openai": "^4.77.0",
+    "sql.js": "^1.11.0",
     "uuid": "^11.0.5"
   },
   "devDependencies": {

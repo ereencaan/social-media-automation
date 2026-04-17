@@ -12,25 +12,26 @@ function getClient() {
 
   const auth = new google.auth.GoogleAuth({
     keyFile: keyPath,
-    scopes: ['https://www.googleapis.com/auth/drive.file']
+    scopes: ['https://www.googleapis.com/auth/drive']
   });
 
   driveClient = google.drive({ version: 'v3', auth });
   return driveClient;
 }
 
-async function ensureFolder(drive, folderName, parentId = null) {
+async function ensureFolder(drive, folderName, parentId) {
   const query = [
     `name='${folderName}'`,
     "mimeType='application/vnd.google-apps.folder'",
-    'trashed=false'
+    'trashed=false',
+    `'${parentId}' in parents`
   ];
-  if (parentId) query.push(`'${parentId}' in parents`);
 
   const res = await drive.files.list({
     q: query.join(' and '),
     fields: 'files(id, name)',
-    spaces: 'drive'
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true
   });
 
   if (res.data.files.length > 0) return res.data.files[0].id;
@@ -39,9 +40,10 @@ async function ensureFolder(drive, folderName, parentId = null) {
     requestBody: {
       name: folderName,
       mimeType: 'application/vnd.google-apps.folder',
-      ...(parentId ? { parents: [parentId] } : {})
+      parents: [parentId]
     },
-    fields: 'id'
+    fields: 'id',
+    supportsAllDrives: true
   });
 
   return folder.data.id;
@@ -53,7 +55,7 @@ async function uploadImage(imageBuffer, fileName) {
   const now = new Date();
   const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-  const rootFolderId = await ensureFolder(drive, 'ContentAI');
+  const rootFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID || '1v36Xsea0RPRrj1W9C7sgWjrYdwFRAOR0';
   const monthFolderId = await ensureFolder(drive, yearMonth, rootFolderId);
 
   const stream = new Readable();
@@ -69,12 +71,14 @@ async function uploadImage(imageBuffer, fileName) {
       mimeType: 'image/jpeg',
       body: stream
     },
-    fields: 'id, webViewLink, webContentLink'
+    fields: 'id, webViewLink, webContentLink',
+    supportsAllDrives: true
   });
 
   await drive.permissions.create({
     fileId: file.data.id,
-    requestBody: { role: 'reader', type: 'anyone' }
+    requestBody: { role: 'reader', type: 'anyone' },
+    supportsAllDrives: true
   });
 
   const publicUrl = `https://drive.google.com/uc?export=view&id=${file.data.id}`;
