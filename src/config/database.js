@@ -71,14 +71,45 @@ async function init() {
   // ---- brand settings (one row per org) ---------------------------------
   db.run(`
     CREATE TABLE IF NOT EXISTS brand_settings (
-      org_id        TEXT PRIMARY KEY REFERENCES orgs(id) ON DELETE CASCADE,
-      logo_url      TEXT,
-      phone         TEXT,
-      website       TEXT,
-      primary_color TEXT,
-      updated_at    TEXT DEFAULT (datetime('now'))
+      org_id             TEXT PRIMARY KEY REFERENCES orgs(id) ON DELETE CASCADE,
+      logo_url           TEXT,
+      logo_cloudinary_id TEXT,
+      phone              TEXT,
+      whatsapp           TEXT,
+      website            TEXT,
+      instagram_handle   TEXT,
+      facebook_handle    TEXT,
+      linkedin_handle    TEXT,
+      overlay_position   TEXT,
+      primary_color      TEXT,
+      updated_at         TEXT DEFAULT (datetime('now'))
     )
   `);
+  // Idempotent migration: add columns that may be missing on older DBs
+  const existingCols = new Set(
+    db.exec("PRAGMA table_info(brand_settings)")[0]?.values.map(r => r[1]) || []
+  );
+  const wantedCols = [
+    ['logo_cloudinary_id',   'TEXT'],
+    ['whatsapp',             'TEXT'],
+    ['instagram_handle',     'TEXT'],
+    ['facebook_handle',      'TEXT'],
+    ['linkedin_handle',      'TEXT'],
+    ['overlay_position',     'TEXT'],
+    ['primary_color',        'TEXT'],
+    // Business profile — used to steer content generation
+    ['business_name',        'TEXT'],
+    ['industry',             'TEXT'],
+    ['business_description', 'TEXT'],
+    ['target_audience',      'TEXT'],
+    ['tone_of_voice',        'TEXT'],
+    ['content_language',     'TEXT'],
+  ];
+  for (const [name, type] of wantedCols) {
+    if (!existingCols.has(name)) {
+      db.run(`ALTER TABLE brand_settings ADD COLUMN ${name} ${type}`);
+    }
+  }
 
   // ---- content ----------------------------------------------------------
   db.run(`
@@ -101,6 +132,20 @@ async function init() {
   `);
   db.run(`CREATE INDEX IF NOT EXISTS idx_posts_org        ON posts(org_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_posts_org_status ON posts(org_id, status)`);
+
+  // Idempotent migration for orchestrator quality fields
+  const existingPostCols = new Set(
+    db.exec("PRAGMA table_info(posts)")[0]?.values.map(r => r[1]) || []
+  );
+  const wantedPostCols = [
+    ['quality_score',  'INTEGER'],
+    ['quality_report', 'TEXT'],    // JSON blob: { breakdown, issues, suggestions, verdict, refined, ... }
+  ];
+  for (const [name, type] of wantedPostCols) {
+    if (!existingPostCols.has(name)) {
+      db.run(`ALTER TABLE posts ADD COLUMN ${name} ${type}`);
+    }
+  }
 
   db.run(`
     CREATE TABLE IF NOT EXISTS post_logs (

@@ -35,4 +35,21 @@ async function generateImage(prompt, platform = 'default') {
   };
 }
 
-module.exports = { generateImage };
+// Expose a small chat-completion helper that other services (the orchestrator)
+// can use to run critiques or JSON-mode calls against GPT-4-class models.
+async function chatJSON({ system, user, model = 'gpt-4o-mini', max_tokens = 1200 }) {
+  const client = getClient();
+  const resp = await client.chat.completions.create({
+    model,
+    max_tokens,
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user',   content: user },
+    ],
+  });
+  const raw = resp.choices[0].message.content;
+  return JSON.parse(raw);
+}
+
+module.exports = { generateImage, chatJSON };

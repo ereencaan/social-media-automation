@@ -32,7 +32,12 @@
           <input type="email" name="email" required placeholder="you@company.com" />
         </label>
         <label>Password
-          <input type="password" name="password" required minlength="8" placeholder="••••••••" />
+          <div class="pw-wrap">
+            <input type="password" name="password" required minlength="8" placeholder="••••••••" />
+            <button type="button" class="pw-toggle" aria-label="Show password" data-target="prev">
+              <span class="eye-on">👁</span><span class="eye-off hidden">🙈</span>
+            </button>
+          </div>
         </label>
         <button type="submit" class="btn btn-primary btn-block">Log in</button>
         <div class="auth-error" id="login-error"></div>
@@ -50,7 +55,12 @@
           <input type="email" name="email" required placeholder="you@company.com" />
         </label>
         <label>Password
-          <input type="password" name="password" required minlength="8" placeholder="At least 8 characters" />
+          <div class="pw-wrap">
+            <input type="password" name="password" required minlength="8" placeholder="At least 8 characters" />
+            <button type="button" class="pw-toggle" aria-label="Show password" data-target="prev">
+              <span class="eye-on">👁</span><span class="eye-off hidden">🙈</span>
+            </button>
+          </div>
         </label>
         <button type="submit" class="btn btn-primary btn-block">Create account</button>
         <div class="auth-error" id="register-error"></div>

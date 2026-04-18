@@ -12,22 +12,53 @@ function getClient() {
 
 const PLATFORM_TONES = {
   instagram: 'casual, engaging, emoji-friendly, short and punchy',
-  facebook: 'friendly, conversational, community-oriented',
-  linkedin: 'professional, insightful, industry-focused, no excessive emojis'
+  facebook:  'friendly, conversational, community-oriented',
+  linkedin:  'professional, insightful, industry-focused, no excessive emojis',
 };
 
-async function generateContent(prompt, platforms = ['instagram']) {
+// Build the "who we are" block that teaches Claude about the business.
+// If nothing useful is set, returns null and the model works freestyle.
+function buildBusinessBlock(business) {
+  if (!business) return null;
+  const lines = [];
+  if (business.business_name)        lines.push(`Business name: ${business.business_name}`);
+  if (business.industry)             lines.push(`Industry / vertical: ${business.industry}`);
+  if (business.business_description) lines.push(`What the business does: ${business.business_description}`);
+  if (business.target_audience)      lines.push(`Target audience: ${business.target_audience}`);
+  if (business.tone_of_voice)        lines.push(`Preferred tone of voice: ${business.tone_of_voice}`);
+  if (business.content_language)     lines.push(`Write the content in: ${business.content_language}`);
+  if (business.website)              lines.push(`Website: ${business.website}`);
+  if (business.instagram_handle)     lines.push(`Instagram: @${String(business.instagram_handle).replace(/^@/, '')}`);
+  return lines.length ? lines.join('\n') : null;
+}
+
+/**
+ * Generate post content.
+ * @param {string} prompt             — topic / brief from the user
+ * @param {string[]} platforms
+ * @param {object} [opts]
+ * @param {object} [opts.business]    — brand_settings row with business profile
+ * @param {boolean} [opts.onBrand=true] — when false, ignore the business context
+ */
+async function generateContent(prompt, platforms = ['instagram'], opts = {}) {
   const anthropic = getClient();
   const platformList = platforms.join(', ');
   const toneGuide = platforms.map(p => `${p}: ${PLATFORM_TONES[p] || 'neutral'}`).join('\n');
 
-  const response = await anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 1024,
-    messages: [{
-      role: 'user',
-      content: `You are a social media content expert. Generate post content based on this prompt:
+  const businessBlock = opts.onBrand === false ? null : buildBusinessBlock(opts.business);
 
+  const systemParts = [
+    'You are a senior social media strategist and copywriter.',
+    'You craft scroll-stopping posts that feel authentic to the brand voice and obviously come from a real business — never generic stock copy.',
+  ];
+  if (businessBlock) {
+    systemParts.push(
+      'CRITICAL: The content MUST reflect the following business. Every post, caption, hashtag, and image prompt must be clearly connected to what this business actually does and who it serves. Do not output generic content disconnected from the business. If the user\'s topic is seasonal or general, connect it back to the business.',
+      '\n--- BUSINESS PROFILE ---\n' + businessBlock + '\n--- END BUSINESS PROFILE ---',
+    );
+  }
+
+  const userMessage = `Topic / brief from the user:
 "${prompt}"
 
 Target platforms: ${platformList}
@@ -35,22 +66,82 @@ Target platforms: ${platformList}
 Tone guide per platform:
 ${toneGuide}
 
-Respond in JSON format ONLY (no markdown):
+Respond with ONLY raw JSON (no markdown fences) matching this schema:
 {
-  "caption": "The main caption text (use the most universal tone if multiple platforms)",
-  "hashtags": ["tag1", "tag2", ...up to 15 relevant hashtags without # symbol],
+  "caption": "The main caption (universal tone if multiple platforms).",
+  "hashtags": ["tag1","tag2", ...up to 15 relevant hashtags, without the # prefix],
   "platformCaptions": {
-    "instagram": "Instagram-specific caption",
-    "facebook": "Facebook-specific caption",
-    "linkedin": "LinkedIn-specific caption"
+    "instagram": "...",
+    "facebook":  "...",
+    "linkedin":  "..."
   },
-  "imagePrompt": "A detailed DALL-E prompt to generate a matching visual for this post"
-}`
-    }]
+  "imagePrompt": "A detailed image-generation prompt that visually fits this post AND clearly evokes the business. Describe subject, style, composition, lighting, and mood — avoid text in the image."
+}`;
+
+  const response = await anthropic.messages.create({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 1400,
+    system: systemParts.join('\n\n'),
+    messages: [{ role: 'user', content: userMessage }],
   });
 
-  const text = response.content[0].text;
-  return JSON.parse(text);
+  const text = response.content[0].text.trim();
+  // Strip accidental ```json fences just in case
+  const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '');
+  return JSON.parse(cleaned);
 }
 
-module.exports = { generateContent };
+/**
+ * Rewrite an existing post based on a critique. Used by the orchestrator's
+ * refine step. Preserves the business context and platform-tailoring logic
+ * from generateContent, but frames the request as an improvement pass.
+ */
+async function refineContent({ previous, critique, prompt, platforms = ['instagram'], business, onBrand = true }) {
+  const anthropic = getClient();
+  const businessBlock = onBrand === false ? null : buildBusinessBlock(business);
+
+  const systemParts = [
+    'You are a senior social media strategist and copywriter.',
+    'You previously produced a draft post. An independent reviewer has now critiqued it. ' +
+    'Rewrite the post to address every issue in the critique while keeping the parts the reviewer liked.',
+  ];
+  if (businessBlock) {
+    systemParts.push(
+      'CRITICAL: The content MUST still clearly reflect this business:\n--- BUSINESS PROFILE ---\n' +
+      businessBlock + '\n--- END BUSINESS PROFILE ---',
+    );
+  }
+
+  const userMessage = `Original topic:
+"${prompt}"
+
+Target platforms: ${platforms.join(', ')}
+
+Previous draft (JSON):
+${JSON.stringify(previous, null, 2)}
+
+Reviewer critique (JSON):
+${JSON.stringify(critique, null, 2)}
+
+Produce an improved version using the same schema as before:
+{
+  "caption": "...",
+  "hashtags": [...],
+  "platformCaptions": { "instagram": "...", "facebook": "...", "linkedin": "..." },
+  "imagePrompt": "..."
+}
+
+Return ONLY raw JSON.`;
+
+  const response = await anthropic.messages.create({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 1400,
+    system: systemParts.join('\n\n'),
+    messages: [{ role: 'user', content: userMessage }],
+  });
+  const text = response.content[0].text.trim();
+  const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '');
+  return JSON.parse(cleaned);
+}
+
+module.exports = { generateContent, refineContent };
