@@ -680,6 +680,40 @@ tr.clickable:hover { background: var(--surface-2); }
 }
 
 /* ============================================================
+   PROMPT ANALYZER PANEL (inline below prompt textarea)
+   ============================================================ */
+.analyzer-panel {
+  margin-top: 10px;
+  padding: 12px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+}
+.analyzer-head {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 8px;
+}
+.analyzer-score {
+  display: inline-flex; align-items: baseline; gap: 2px;
+  padding: 6px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--q, var(--accent));
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+  color: var(--q, var(--text));
+  flex-shrink: 0;
+}
+.analyzer-score-num { font-size: 18px; }
+.analyzer-score-lbl { font-size: 11px; color: var(--text-dim); font-weight: 500; }
+.analyzer-verdict { font-size: 13px; color: var(--text); flex: 1; line-height: 1.45; }
+.analyzer-suggestions {
+  margin: 0; padding-left: 18px;
+  font-size: 12px; color: var(--text-dim);
+}
+.analyzer-suggestions li { margin-bottom: 3px; }
+
+/* ============================================================
    QUALITY SCORE (badge + dial + axis bars)
    ============================================================ */
 /* Tier color tokens used by badge/dial/bar */

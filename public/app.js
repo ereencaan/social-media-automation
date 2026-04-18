@@ -570,6 +570,21 @@ async function openLeadDrawer(leadId) {
         : el('div', { class: 'empty-state', style: 'padding:20px' }, 'No activity yet.'),
     ));
 
+    // AI Email composer
+    body.appendChild(el('div', { class: 'drawer-section' },
+      el('h4', {}, 'AI email'),
+      el('button', {
+        class: 'btn btn-primary btn-sm',
+        onclick: () => openEmailComposer(lead, () => {
+          // after save, refresh activities
+          api('/api/leads/' + leadId + '/activities').then((list) => {
+            activities = list;
+            renderDrawer();
+          }).catch(() => {});
+        }),
+      }, '✉ Draft email for this lead'),
+    ));
+
     // Danger
     body.appendChild(el('div', { class: 'drawer-section' },
       el('button', { class: 'btn btn-danger btn-sm', onclick: async () => {
@@ -592,6 +607,170 @@ async function openLeadDrawer(leadId) {
 function closeDrawer() {
   $('#drawer').classList.add('hidden');
   $('#drawer-backdrop').classList.add('hidden');
+}
+
+// =======================================================================
+//   LEAD EMAIL COMPOSER
+// =======================================================================
+function openEmailComposer(lead, onSaved) {
+  const backdrop = el('div', { class: 'modal-backdrop', onclick: (e) => {
+    if (e.target === backdrop) closeEmailComposer();
+  } });
+  const modal = el('div', { class: 'modal', style: 'max-width: 780px' });
+
+  let current = { email: null, quality: null, goal: 'intro', extra: '' };
+  let saving = false;
+
+  const render = () => {
+    modal.innerHTML = '';
+    modal.appendChild(el('div', { class: 'modal-header' },
+      el('div', {},
+        el('div', { class: 'modal-title' }, `Email ${lead.name || lead.email || 'lead'}`),
+        el('div', { class: 'section-sub', style: 'margin-top:2px' },
+          `To: ${lead.email || '(no email on file)'}`),
+      ),
+      el('button', { class: 'icon-btn', onclick: closeEmailComposer, 'aria-label': 'Close' }, '✕'),
+    ));
+
+    const body = el('div', { style: 'padding:20px; overflow-y:auto' });
+
+    // Goal + extra
+    const goalSelect = (() => {
+      const s = el('select', { name: 'goal' });
+      [
+        ['intro',      'Introduce our services'],
+        ['followup',   'Follow up on a prior thread'],
+        ['meeting',    'Book a short call / meeting'],
+        ['reactivate', 'Re-engage a cold lead'],
+        ['proposal',   'Share proposal / pricing'],
+        ['custom',     'Custom (use extra instructions)'],
+      ].forEach(([v, t]) => {
+        const o = el('option', { value: v }, t);
+        if (v === current.goal) o.selected = true;
+        s.appendChild(o);
+      });
+      s.onchange = () => { current.goal = s.value; };
+      return s;
+    })();
+    const extraTxt = el('textarea', {
+      name: 'extra', rows: 2,
+      placeholder: 'Optional: extra instructions or specific angle (used heavily when goal = Custom).',
+    }, current.extra || '');
+    extraTxt.oninput = () => { current.extra = extraTxt.value; };
+
+    body.appendChild(el('div', { class: 'row' },
+      el('div', { class: 'field' }, el('label', {}, 'Goal', goalSelect)),
+      el('div', { class: 'field' }, el('label', {}, 'Extra instructions (optional)', extraTxt)),
+    ));
+
+    const generateBtn = el('button', { class: 'btn btn-primary' },
+      current.email ? 'Regenerate' : '✨ Draft with AI',
+    );
+    generateBtn.onclick = async () => {
+      generateBtn.disabled = true;
+      generateBtn.innerHTML = '<span class="loading"></span> Drafting + reviewing…';
+      try {
+        const result = await api('/api/leads/' + lead.id + '/emails/draft', {
+          method: 'POST',
+          body: { goal: current.goal, extra: current.extra },
+        });
+        current.email = result.email;
+        current.quality = {
+          score:        result.quality.score,
+          breakdown:    result.quality.breakdown,
+          issues:       result.quality.issues,
+          suggestions:  result.quality.suggestions,
+          verdict:      result.quality.verdict,
+          needsReview:  result.quality.needsReview,
+          perModel:     result.quality.perModel,
+          modelsUsed:   result.quality.modelsUsed,
+          modelsFailed: result.quality.modelsFailed,
+          degraded:     result.quality.degraded,
+        };
+        render();
+      } catch (err) {
+        toast(err.message, 'error');
+      } finally {
+        generateBtn.disabled = false;
+        generateBtn.innerHTML = '✨ Draft with AI';
+      }
+    };
+    body.appendChild(el('div', { style: 'margin-bottom:16px' }, generateBtn));
+
+    // Draft editor (appears after first generation)
+    if (current.email) {
+      const subjInput = el('input', {
+        type: 'text', name: 'subject', value: current.email.subject,
+      });
+      subjInput.oninput = () => { current.email.subject = subjInput.value; };
+      const bodyTxt = el('textarea', {
+        name: 'body', rows: 10, style: 'font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px',
+      }, current.email.body);
+      bodyTxt.oninput = () => { current.email.body = bodyTxt.value; };
+
+      body.appendChild(el('div', { class: 'field' },
+        el('label', {}, 'Subject', subjInput),
+      ));
+      body.appendChild(el('div', { class: 'field' },
+        el('label', {}, 'Body', bodyTxt),
+      ));
+
+      const qp = renderQualityPanel(current.quality);
+      if (qp) body.appendChild(qp);
+
+      body.appendChild(el('div', { class: 'form-actions' },
+        el('button', { class: 'btn btn-ghost', onclick: async () => {
+          try {
+            await navigator.clipboard.writeText(
+              `Subject: ${current.email.subject}\n\n${current.email.body}`
+            );
+            toast('Copied to clipboard', 'success');
+          } catch { toast('Copy failed', 'error'); }
+        } }, '📋 Copy'),
+        el('button', {
+          class: 'btn btn-primary',
+          onclick: async () => {
+            if (saving) return;
+            saving = true;
+            try {
+              await api('/api/leads/' + lead.id + '/emails/log', {
+                method: 'POST',
+                body: {
+                  subject: current.email.subject,
+                  body:    current.email.body,
+                  goal:    current.goal,
+                  quality: current.quality,
+                },
+              });
+              toast('Saved to timeline', 'success');
+              if (onSaved) onSaved();
+              closeEmailComposer();
+            } catch (err) {
+              toast(err.message, 'error');
+            } finally { saving = false; }
+          },
+        }, 'Save to timeline'),
+      ));
+    }
+
+    modal.appendChild(body);
+  };
+
+  render();
+  backdrop.appendChild(modal);
+  document.body.appendChild(backdrop);
+  document.body.style.overflow = 'hidden';
+  const onKey = (e) => { if (e.key === 'Escape') closeEmailComposer(); };
+  document.addEventListener('keydown', onKey);
+  backdrop._onKey = onKey;
+}
+function closeEmailComposer() {
+  const backdrops = $$('.modal-backdrop');
+  const last = backdrops[backdrops.length - 1];
+  if (!last) return;
+  if (last._onKey) document.removeEventListener('keydown', last._onKey);
+  last.remove();
+  if (!$('.modal-backdrop')) document.body.style.overflow = '';
 }
 
 // =======================================================================
@@ -629,14 +808,80 @@ VIEWS.posts = async function postsView(root, myGen) {
   }
 
   const form = el('form');
+
+  // Prompt field with an inline analyzer panel below it
+  const promptTextarea = el('textarea', {
+    name: 'prompt', required: true, rows: 3,
+    placeholder: hasBizProfile
+      ? 'e.g. Valentine\'s day sale — 50% off this week.  (We\'ll make it fit your business automatically.)'
+      : 'e.g. Announce our Q2 product launch with a confident, premium tone.',
+  });
+  const analyzeBtn = el('button', {
+    type: 'button', class: 'btn btn-sm btn-ghost',
+    style: 'position:absolute; right:8px; bottom:8px;',
+  }, '🔍 Analyze prompt');
+  const rewriteBtn = el('button', {
+    type: 'button', class: 'btn btn-sm btn-ghost hidden',
+    style: 'margin-left:6px',
+  }, '✨ Rewrite');
+  const analyzerPanel = el('div', { class: 'analyzer-panel hidden' });
+
   form.appendChild(el('div', { class: 'field' },
-    el('label', {}, 'What should this post be about?',
-      el('textarea', { name: 'prompt', required: true, rows: 3,
-        placeholder: hasBizProfile
-          ? 'e.g. Valentine\'s day sale — 50% off this week.  (We\'ll make it fit your business automatically.)'
-          : 'e.g. Announce our Q2 product launch with a confident, premium tone.',
-      })),
+    el('label', {}, 'What should this post be about?'),
+    el('div', { style: 'position:relative' },
+      promptTextarea,
+      analyzeBtn,
+    ),
+    analyzerPanel,
   ));
+
+  // --- Analyze & Rewrite handlers ---
+  let lastAnalysis = null;
+  const platformSelect = () => (form.querySelector('[name=platforms]') || {}).value || 'instagram';
+
+  analyzeBtn.onclick = async () => {
+    const prompt = promptTextarea.value.trim();
+    if (!prompt) { toast('Write a prompt first', 'error'); return; }
+    analyzeBtn.disabled = true;
+    analyzeBtn.innerHTML = '<span class="loading"></span> Analyzing…';
+    try {
+      const result = await api('/api/posts/analyze-prompt', {
+        method: 'POST',
+        body: { prompt, platforms: [platformSelect()] },
+      });
+      lastAnalysis = result;
+      renderAnalyzerPanel(analyzerPanel, result, rewriteBtn);
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      analyzeBtn.disabled = false;
+      analyzeBtn.innerHTML = '🔍 Analyze prompt';
+    }
+  };
+  rewriteBtn.onclick = async () => {
+    const prompt = promptTextarea.value.trim();
+    if (!prompt) return;
+    rewriteBtn.disabled = true;
+    rewriteBtn.innerHTML = '<span class="loading"></span> Rewriting…';
+    try {
+      const result = await api('/api/posts/rewrite-prompt', {
+        method: 'POST',
+        body: {
+          prompt,
+          platforms: [platformSelect()],
+          suggestions: lastAnalysis && lastAnalysis.suggestions ? lastAnalysis.suggestions : [],
+        },
+      });
+      promptTextarea.value = result.prompt;
+      toast('Prompt rewritten — click Analyze again to re-score', 'success');
+      rewriteBtn.classList.add('hidden');
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      rewriteBtn.disabled = false;
+      rewriteBtn.innerHTML = '✨ Rewrite';
+    }
+  };
   form.appendChild(el('div', { class: 'row' },
     el('div', { class: 'field' },
       el('label', {}, 'Platform',
@@ -783,6 +1028,39 @@ VIEWS.posts = async function postsView(root, myGen) {
   }
   root.appendChild(grid);
 };
+
+// =======================================================================
+//   PROMPT ANALYZER PANEL (inline below prompt textarea)
+// =======================================================================
+function renderAnalyzerPanel(root, analysis, rewriteBtn) {
+  root.classList.remove('hidden');
+  root.innerHTML = '';
+  const tier = qualityTier(analysis.score || 0);
+
+  const head = el('div', { class: 'analyzer-head' },
+    el('div', { class: `analyzer-score tier-${tier}` },
+      el('span', { class: 'analyzer-score-num' }, String(analysis.score || 0)),
+      el('span', { class: 'analyzer-score-lbl' }, '/100'),
+    ),
+    el('div', { class: 'analyzer-verdict' }, analysis.verdict || 'Prompt analyzed.'),
+  );
+  // Show rewrite button only when there's meaningful room to improve
+  if ((analysis.score || 0) < 85 && (analysis.suggestions || []).length) {
+    if (!rewriteBtn.parentElement) head.appendChild(rewriteBtn);
+    else rewriteBtn.classList.remove('hidden');
+    head.appendChild(rewriteBtn);
+  }
+  root.appendChild(head);
+
+  if (analysis.suggestions && analysis.suggestions.length) {
+    const ul = el('ul', { class: 'analyzer-suggestions' });
+    analysis.suggestions.slice(0, 4).forEach(s => {
+      const text = typeof s === 'string' ? s : s.text;
+      ul.appendChild(el('li', {}, text));
+    });
+    root.appendChild(ul);
+  }
+}
 
 // =======================================================================
 //   QUALITY WIDGETS
@@ -1033,6 +1311,28 @@ function openPostPreview(post) {
         class: 'btn btn-ghost btn-sm',
         href: post.drive_url || '#', target: '_blank', rel: 'noopener noreferrer',
       }, '↗ Open media'),
+      // Regenerate with suggestions (only shows when we have suggestions to apply)
+      (post.quality && post.quality.suggestions && post.quality.suggestions.length)
+        ? el('button', {
+            class: 'btn btn-ghost btn-sm',
+            onclick: async (e) => {
+              const btn = e.currentTarget;
+              btn.disabled = true;
+              btn.innerHTML = '<span class="loading"></span> Regenerating…';
+              try {
+                const updated = await api('/api/posts/' + post.id + '/regenerate-copy', { method: 'POST' });
+                post = updated;
+                toast('Regenerated — new score ' + (updated.quality ? updated.quality.score : '—'), 'success');
+                render();
+              } catch (err) {
+                toast(err.message, 'error');
+                btn.disabled = false;
+                btn.textContent = '🔄 Regenerate with suggestions';
+              }
+            },
+            title: 'Rewrite caption + hashtags using reviewer suggestions. Image is kept.',
+          }, '🔄 Regenerate with suggestions')
+        : null,
       el('button', {
         class: 'btn btn-primary btn-sm',
         onclick: async () => {
