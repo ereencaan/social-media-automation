@@ -740,6 +740,37 @@ tr.clickable:hover { background: var(--surface-2); }
   width: fit-content;
 }
 .quality-chip-warn { background: rgba(245,158,11,0.14); color: #fbbf24; }
+.quality-chip-row { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.reviewer-chips {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  margin: 12px 0 16px;
+}
+.reviewer-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px 4px 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--q, var(--accent));
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+.reviewer-chip-name { color: var(--text-dim); }
+.reviewer-chip-score { color: var(--q, var(--text)); font-weight: 700; }
+
+.quality-src-tag {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-dim);
+  margin-right: 4px;
+  vertical-align: middle;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
 
 .axes { display: flex; flex-direction: column; gap: 8px; }
 .axis-label {

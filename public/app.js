@@ -834,26 +834,52 @@ function renderQualityPanel(quality) {
     ),
     el('div', { class: 'quality-verdict' },
       el('div', { class: 'quality-verdict-text' }, quality.verdict || ''),
-      quality.refined
-        ? el('div', { class: 'quality-chip' }, '✨ Auto-refined')
-        : null,
-      quality.needsReview
-        ? el('div', { class: 'quality-chip quality-chip-warn' }, '⚠ Needs review')
-        : null,
+      el('div', { class: 'quality-chip-row' },
+        quality.refined        ? el('span', { class: 'quality-chip' }, '✨ Auto-refined') : null,
+        quality.needsReview    ? el('span', { class: 'quality-chip quality-chip-warn' }, '⚠ Needs review') : null,
+        quality.degraded       ? el('span', { class: 'quality-chip quality-chip-warn' }, '⚠ Degraded') : null,
+      ),
     ),
   ));
+
+  // Per-model breakdown — shows how each AI reviewer scored the artifact
+  if (quality.perModel && Object.keys(quality.perModel).length) {
+    const modelDisplay = { claude: 'Claude', gemini: 'Gemini', openai: 'GPT-4' };
+    wrap.appendChild(el('div', { class: 'reviewer-chips' },
+      ...Object.entries(quality.perModel).map(([model, rev]) =>
+        el('div', {
+          class: `reviewer-chip tier-${qualityTier(rev.overall)}`,
+          title: rev.verdict || '',
+        },
+          el('span', { class: 'reviewer-chip-name' }, modelDisplay[model] || model),
+          el('span', { class: 'reviewer-chip-score' }, String(rev.overall)),
+        ),
+      ),
+    ));
+  }
+
   wrap.appendChild(el('div', { class: 'axes' }, ...bars));
 
+  const renderAnnotated = (item) => {
+    // Item may be a plain string (legacy) or { model, text } (multi-reviewer)
+    if (typeof item === 'string') return el('li', {}, item);
+    const modelLbl = { claude: 'Claude', gemini: 'Gemini', openai: 'GPT' }[item.model] || item.model;
+    return el('li', {},
+      el('span', { class: 'quality-src-tag' }, modelLbl),
+      ' ',
+      item.text,
+    );
+  };
   if (quality.issues && quality.issues.length) {
     wrap.appendChild(el('div', { class: 'quality-list' },
       el('div', { class: 'quality-list-title' }, 'Issues'),
-      el('ul', {}, ...quality.issues.map(i => el('li', {}, i))),
+      el('ul', {}, ...quality.issues.map(renderAnnotated)),
     ));
   }
   if (quality.suggestions && quality.suggestions.length) {
     wrap.appendChild(el('div', { class: 'quality-list' },
       el('div', { class: 'quality-list-title' }, 'Suggestions'),
-      el('ul', {}, ...quality.suggestions.map(s => el('li', {}, s))),
+      el('ul', {}, ...quality.suggestions.map(renderAnnotated)),
     ));
   }
   if (quality.refinementNotes) {
