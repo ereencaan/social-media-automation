@@ -1691,6 +1691,34 @@ async function openPlanDetail(planId) {
     ),
   ));
 
+  // Automation info + bulk generate
+  const pendingCount = plan.items.filter(it => it.status === 'planned' || it.status === 'failed').length;
+  body.appendChild(el('div', { class: 'drawer-section notice', style: 'background: rgba(99,102,241,0.08); border-color: rgba(99,102,241,0.25); color: var(--text)' },
+    el('div', { style: 'font-size:13px; line-height:1.5; margin-bottom:8px' },
+      el('strong', {}, '⏱ How automation works: '),
+      'Each item is generated automatically ~48h before its scheduled date. Items further out simply wait. You can generate earlier manually at any time.',
+    ),
+    pendingCount > 0 ? el('button', {
+      class: 'btn btn-ghost btn-sm',
+      onclick: async (e) => {
+        if (!confirm(`Generate all ${pendingCount} pending items now? This can take several minutes.`)) return;
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="loading"></span> Queued…';
+        try {
+          const r = await api(`/api/plans/${plan.id}/generate-all-pending`, { method: 'POST' });
+          toast(`Queued ${r.scheduled} items — drafts will appear in the list as they complete`, 'success', 5000);
+          // Re-open drawer after a short delay so the statuses refresh
+          setTimeout(() => openPlanDetail(plan.id), 1500);
+        } catch (err) {
+          toast(err.message, 'error');
+          btn.disabled = false;
+          btn.innerHTML = `⚡ Generate all ${pendingCount} pending now`;
+        }
+      },
+    }, `⚡ Generate all ${pendingCount} pending now`) : null,
+  ));
+
   // View toggle: list vs grid
   let viewMode = 'list';
   const itemsWrap = el('div', { class: 'drawer-section' });

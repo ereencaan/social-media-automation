@@ -243,6 +243,14 @@ async function init() {
   db.run(`CREATE INDEX IF NOT EXISTS idx_plan_items_org_status   ON content_plan_items(org_id, status)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_plan_items_schedule     ON content_plan_items(scheduled_for)`);
 
+  // Idempotent: add 'attempts' column for auto-retry on failed items
+  const planItemCols = new Set(
+    db.exec("PRAGMA table_info(content_plan_items)")[0]?.values.map(r => r[1]) || []
+  );
+  if (!planItemCols.has('attempts')) {
+    db.run(`ALTER TABLE content_plan_items ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0`);
+  }
+
   // Business-specific important dates (company anniversary, launches, etc).
   // These flow into the content planner the same way country/industry days do.
   db.run(`

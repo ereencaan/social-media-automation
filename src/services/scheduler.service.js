@@ -48,14 +48,22 @@ async function generatePlanItem(itemId) {
   if (!item) return;
   // Guard: already past this step
   if (item.status !== 'planned' && item.status !== 'failed') return;
+  if ((item.attempts || 0) >= PLAN_MAX_ATTEMPTS) {
+    // Give up silently — user can still click 'Generate now' to reset
+    return;
+  }
 
   const plan = prepare('SELECT * FROM content_plans WHERE id = ?').get(item.plan_id);
   if (!plan || plan.status !== 'active') return;
 
-  // Mark generating so concurrent ticks don't double-run this item
-  const claim = prepare(
-    "UPDATE content_plan_items SET status = 'generating', updated_at = datetime('now') WHERE id = ? AND status IN ('planned','failed')"
-  ).run(itemId);
+  // Mark generating + bump attempts so concurrent ticks can't double-run
+  const claim = prepare(`
+    UPDATE content_plan_items
+    SET status = 'generating',
+        attempts = COALESCE(attempts, 0) + 1,
+        updated_at = datetime('now')
+    WHERE id = ? AND status IN ('planned','failed')
+  `).run(itemId);
   if (!claim.changes) return;  // someone else already picked it up
 
   let platforms = [];
@@ -105,17 +113,22 @@ async function generatePlanItem(itemId) {
 async function runPlanGenerationWorker() {
   const window = new Date(Date.now() + PLAN_GENERATE_LEAD_HOURS * 60 * 60 * 1000).toISOString();
 
-  // Pull eligible items; exclude items already in flight
+  // Pull eligible items; exclude items already in flight. Also retry
+  // 'failed' items up to PLAN_MAX_ATTEMPTS times — external APIs (Flux/BFL)
+  // are flaky and most failures succeed on the second try.
   const due = prepare(`
     SELECT i.id
     FROM content_plan_items i
     JOIN content_plans p ON p.id = i.plan_id
     WHERE p.status = 'active'
-      AND i.status = 'planned'
+      AND (
+        i.status = 'planned'
+        OR (i.status = 'failed' AND COALESCE(i.attempts, 0) < ?)
+      )
       AND i.scheduled_for <= ?
     ORDER BY i.scheduled_for ASC
     LIMIT ?
-  `).all(window, PLAN_GEN_CONCURRENCY * 3);
+  `).all(PLAN_MAX_ATTEMPTS, window, PLAN_GEN_CONCURRENCY * 3);
 
   if (!due.length) return;
 

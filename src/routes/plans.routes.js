@@ -252,6 +252,36 @@ router.post('/:id/items/:itemId/approve', (req, res) => {
   res.json(presentItem(prepare('SELECT * FROM content_plan_items WHERE id = ?').get(req.params.itemId)));
 });
 
+// Generate every 'planned' / 'failed' item in this plan immediately — useful
+// when the user wants to review all drafts now instead of waiting for the
+// 48h auto-gen window. Runs with a small concurrency cap.
+router.post('/:id/generate-all-pending', async (req, res) => {
+  try {
+    const plan = getOwnedPlan(req.params.id, req.user.orgId);
+    if (!plan) return res.status(404).json({ error: 'Plan not found' });
+
+    const pending = prepare(`
+      SELECT id FROM content_plan_items
+      WHERE plan_id = ? AND org_id = ? AND status IN ('planned','failed')
+      ORDER BY scheduled_for ASC
+    `).all(req.params.id, req.user.orgId);
+
+    // Kick off a background sweep so the HTTP call returns fast.
+    (async () => {
+      const concurrency = 2;
+      for (let i = 0; i < pending.length; i += concurrency) {
+        const chunk = pending.slice(i, i + concurrency);
+        await Promise.all(chunk.map((r) =>
+          generatePlanItemNow(r.id, req.user.orgId).catch((e) =>
+            console.error('[bulk-gen]', r.id, e.message))
+        ));
+      }
+    })();
+
+    res.json({ scheduled: pending.length });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Publish right now (skip waiting for scheduled_for).
 router.post('/:id/items/:itemId/publish-now', async (req, res) => {
   try {

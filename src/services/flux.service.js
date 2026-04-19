@@ -37,29 +37,29 @@ async function generateImage(prompt, platform = 'default') {
   return await pollResult(key, id);
 }
 
-async function pollResult(key, taskId, maxAttempts = 60) {
+// BFL's flux-2-pro latency is usually 30-90s but can spike above 2 min when
+// the shared queue is busy. We wait up to ~5 min before giving up.
+async function pollResult(key, taskId, maxAttempts = 150) {
+  const startMs = Date.now();
   for (let i = 0; i < maxAttempts; i++) {
     const res = await fetch(`${BFL_API}/get_result?id=${taskId}`, {
       headers: { 'X-Key': key }
     });
-
     const data = await res.json();
 
     if (data.status === 'Ready') {
-      return {
-        url: data.result.sample,
-        revisedPrompt: null
-      };
+      return { url: data.result.sample, revisedPrompt: null };
     }
-
     if (data.status === 'Error' || data.status === 'Failed') {
       throw new Error(`Flux generation failed: ${JSON.stringify(data)}`);
     }
 
-    // Wait 2 seconds between polls
-    await new Promise(r => setTimeout(r, 2000));
+    // Progressive backoff: 2s for the first minute, 3s after.
+    const delay = i < 30 ? 2000 : 3000;
+    await new Promise(r => setTimeout(r, delay));
   }
-  throw new Error('Flux generation timeout');
+  const waited = Math.round((Date.now() - startMs) / 1000);
+  throw new Error(`Flux generation timeout (waited ${waited}s, status was still pending)`);
 }
 
 module.exports = { generateImage };
