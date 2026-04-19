@@ -202,6 +202,64 @@ async function init() {
   db.run(`CREATE INDEX IF NOT EXISTS idx_lead_activities_lead ON lead_activities(lead_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_lead_activities_org  ON lead_activities(org_id)`);
 
+  // ---- content planning (calendar-driven + quota-driven post scheduling) --
+  db.run(`
+    CREATE TABLE IF NOT EXISTS content_plans (
+      id            TEXT PRIMARY KEY,
+      org_id        TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+      month         TEXT NOT NULL,         -- YYYY-MM
+      target_count  INTEGER NOT NULL,
+      mode          TEXT NOT NULL,         -- 'calendar' | 'quota' | 'hybrid'
+      strategy      TEXT,                  -- JSON: platform mix, constraints, country
+      status        TEXT NOT NULL DEFAULT 'draft', -- draft|active|completed|archived
+      auto_publish  INTEGER NOT NULL DEFAULT 0,    -- 0=off (safe default), 1=trust mode
+      created_at    TEXT DEFAULT (datetime('now')),
+      updated_at    TEXT DEFAULT (datetime('now'))
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_plans_org_month ON content_plans(org_id, month)`);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS content_plan_items (
+      id            TEXT PRIMARY KEY,
+      org_id        TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+      plan_id       TEXT NOT NULL REFERENCES content_plans(id) ON DELETE CASCADE,
+      scheduled_for TEXT NOT NULL,         -- ISO datetime UTC
+      theme         TEXT,                  -- 'valentines' | 'weekly_tip' | ...
+      topic_brief   TEXT NOT NULL,         -- prompt fed to /generate when the day arrives
+      platforms     TEXT DEFAULT '[]',
+      status        TEXT NOT NULL DEFAULT 'planned',
+           -- planned | generating | draft | approved | published | failed | skipped
+      post_id       TEXT REFERENCES posts(id) ON DELETE SET NULL,
+      reasoning     TEXT,                  -- AI's one-line justification
+      error         TEXT,                  -- last failure reason, if any
+      generated_at  TEXT,
+      published_at  TEXT,
+      created_at    TEXT DEFAULT (datetime('now')),
+      updated_at    TEXT DEFAULT (datetime('now'))
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_plan_items_plan         ON content_plan_items(plan_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_plan_items_org_status   ON content_plan_items(org_id, status)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_plan_items_schedule     ON content_plan_items(scheduled_for)`);
+
+  // Business-specific important dates (company anniversary, launches, etc).
+  // These flow into the content planner the same way country/industry days do.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS brand_special_dates (
+      id         TEXT PRIMARY KEY,
+      org_id     TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+      month      INTEGER NOT NULL,        -- 1..12
+      day        INTEGER NOT NULL,        -- 1..31
+      name       TEXT NOT NULL,
+      note       TEXT,                    -- free-form context for the AI
+      tier       INTEGER NOT NULL DEFAULT 1,  -- 1=must-consider, 2=strong, 3=nice
+      annual     INTEGER NOT NULL DEFAULT 1,  -- 0=one-off, 1=every year
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_brand_dates_org ON brand_special_dates(org_id)`);
+
   flush();
   return db;
 }

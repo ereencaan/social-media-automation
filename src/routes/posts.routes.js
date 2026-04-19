@@ -8,6 +8,7 @@ const { orchestrateContent } = require('../services/orchestrator.service');
 const { analyzePrompt, rewritePrompt } = require('../services/prompt-analyzer.service');
 const { refineContent } = require('../services/claude.service');
 const { reviewArtifact } = require('../services/multi-reviewer.service');
+const { generateAndSavePost } = require('../services/post-factory.service');
 const { uploadImage, uploadFromUrl } = require('../services/cloudinary.service');
 const { listTemplates, renderTemplate, renderVideo } = require('../services/templated.service');
 const { generateVideo, generateVideoFromImage } = require('../services/runway.service');
@@ -17,57 +18,22 @@ const { schedulePost, cancelSchedule, publishPost } = require('../services/sched
 // Generate content with AI (DALL-E + Claude)
 router.post('/generate', async (req, res) => {
   try {
-    const {
-      prompt,
-      platforms = ['instagram'],
-      onBrand = true,
-      variants = 1,        // 1..3 parallel drafts, critique picks the best
-      qualityGate = true,  // enable auto-critique + single refinement pass
-    } = req.body;
+    const { prompt, platforms = ['instagram'], onBrand = true, variants = 1, qualityGate = true } = req.body;
     if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
 
-    // Load brand once: needed for business context AND for the overlay
-    const brand = prepare('SELECT * FROM brand_settings WHERE org_id = ?').get(req.user.orgId);
-
-    // 1. Orchestrated content generation (Claude draft(s) → OpenAI critique → optional Claude refine)
-    const { content, quality } = await orchestrateContent(prompt, platforms, {
-      business: brand, onBrand, variants, qualityGate,
+    const { id, post, content, quality } = await generateAndSavePost({
+      orgId: req.user.orgId, userId: req.user.id,
+      prompt, platforms, onBrand, variants, qualityGate,
     });
 
-    // 2. Generate image with DALL-E
-    const imagePrompt = content.imagePrompt || prompt;
-    const image = await generateImage(imagePrompt, platforms[0]);
-
-    // 3. Download, apply branding overlay, upload to Cloudinary
-    const imageBuffer = await downloadImage(image.url);
-    const finalBuffer = brand ? await applyImageOverlay(imageBuffer, brand) : imageBuffer;
-    const fileName = `post_${Date.now()}.jpg`;
-    const cloudResult = await uploadImage(finalBuffer, fileName);
-
-    // 4. Save to database
-    const id = generateId();
-    const hashtags = content.hashtags.map(t => `#${t}`).join(' ');
-
-    prepare(`
-      INSERT INTO posts (id, org_id, user_id, prompt, caption, hashtags, image_url, drive_url, drive_file_id, platforms, status, quality_score, quality_report)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)
-    `).run(
-      id, req.user.orgId, req.user.id, prompt, content.caption, hashtags,
-      image.url, cloudResult.publicUrl, cloudResult.fileId,
-      JSON.stringify(platforms),
-      quality ? quality.score : null,
-      quality ? JSON.stringify(quality) : null,
-    );
-
     res.json({
-      id,
-      prompt,
-      caption: content.caption,
-      hashtags,
+      id, prompt,
+      caption:          content.caption,
+      hashtags:         post.hashtags,
       platformCaptions: content.platformCaptions,
-      imageUrl: cloudResult.publicUrl,
-      driveUrl: cloudResult.publicUrl,
-      status: 'draft',
+      imageUrl:         post.drive_url,
+      driveUrl:         post.drive_url,
+      status:           'draft',
       quality,
     });
   } catch (err) {

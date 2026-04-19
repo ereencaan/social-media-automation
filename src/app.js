@@ -35,6 +35,7 @@ app.use('/storage', requireAuth, express.static(path.join(__dirname, '../storage
 app.use('/api/posts', requireAuth, require('./routes/posts.routes'));
 app.use('/api/brand', requireAuth, require('./routes/brand.routes'));
 app.use('/api/leads', requireAuth, require('./routes/leads.routes'));
+app.use('/api/plans', requireAuth, require('./routes/plans.routes'));
 
 // Health check
 app.get('/api/health', (req, res) => {

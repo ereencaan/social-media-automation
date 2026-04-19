@@ -1,0 +1,118 @@
+{
+  "_description": "Sector-specific awareness days. 'key' is matched case-insensitively against business.industry. Dates are MM-DD (year-independent). 'tier' lets the planner prioritize: 1 = must-consider, 2 = strong, 3 = nice-to-have. When 'movable' is true, the day floats to a specific weekday — the planner's AI can interpret.",
+  "universal": [
+    { "date": "01-04", "name": "World Braille Day",         "tier": 3 },
+    { "date": "02-04", "name": "World Cancer Day",          "tier": 3 },
+    { "date": "03-08", "name": "International Women's Day", "tier": 2 },
+    { "date": "04-01", "name": "April Fools' Day",          "tier": 2 },
+    { "date": "04-22", "name": "Earth Day",                 "tier": 2 },
+    { "date": "06-05", "name": "World Environment Day",     "tier": 3 },
+    { "date": "09-21", "name": "International Day of Peace","tier": 3 },
+    { "date": "10-10", "name": "World Mental Health Day",   "tier": 2 },
+    { "date": "11-13", "name": "World Kindness Day",        "tier": 3 }
+  ],
+  "sectors": {
+    "software": [
+      { "date": "01-16", "name": "Data Privacy Day",             "tier": 2 },
+      { "date": "01-28", "name": "Data Privacy Day (observed)",  "tier": 2 },
+      { "date": "02-11", "name": "Safer Internet Day",           "tier": 3 },
+      { "date": "03-10", "name": "Developer Appreciation Day",   "tier": 2 },
+      { "date": "03-31", "name": "World Backup Day",             "tier": 1 },
+      { "date": "05-04", "name": "Star Wars Day (dev culture)",  "tier": 3 },
+      { "date": "05-25", "name": "Towel Day / Geek Pride Day",   "tier": 3 },
+      { "date": "09-13", "name": "Programmers' Day",             "tier": 1 },
+      { "date": "10-01", "name": "Cybersecurity Awareness Month","tier": 1, "duration": "month" },
+      { "date": "11-30", "name": "Computer Security Day",        "tier": 2 }
+    ],
+    "saas": [
+      { "date": "03-31", "name": "World Backup Day",             "tier": 1 },
+      { "date": "09-13", "name": "Programmers' Day",             "tier": 1 },
+      { "date": "10-01", "name": "Cybersecurity Awareness Month","tier": 1, "duration": "month" },
+      { "date": "02-11", "name": "Safer Internet Day",           "tier": 2 }
+    ],
+    "ecommerce": [
+      { "date": "07-15", "name": "Amazon Prime Day (typical)",   "tier": 2 },
+      { "date": "10-31", "name": "Halloween shopping",           "tier": 2 },
+      { "date": "11-26", "name": "Black Friday (last Fri Nov)",  "tier": 1, "movable": true },
+      { "date": "11-29", "name": "Cyber Monday",                 "tier": 1, "movable": true },
+      { "date": "11-27", "name": "Small Business Saturday",      "tier": 2, "movable": true },
+      { "date": "12-12", "name": "Green Monday (2nd Mon Dec)",   "tier": 2, "movable": true },
+      { "date": "12-18", "name": "Free Shipping Day",            "tier": 2 }
+    ],
+    "retail": [
+      { "date": "11-26", "name": "Black Friday",                 "tier": 1, "movable": true },
+      { "date": "11-29", "name": "Cyber Monday",                 "tier": 1, "movable": true },
+      { "date": "12-26", "name": "Boxing Day",                   "tier": 2 }
+    ],
+    "food": [
+      { "date": "02-09", "name": "World Pizza Day",              "tier": 2 },
+      { "date": "04-07", "name": "World Health Day",             "tier": 2 },
+      { "date": "05-15", "name": "International Day of Families (family dining)", "tier": 3 },
+      { "date": "06-01", "name": "World Milk Day",               "tier": 3 },
+      { "date": "10-16", "name": "World Food Day",               "tier": 1 }
+    ],
+    "fitness": [
+      { "date": "04-06", "name": "World Physical Activity Day",  "tier": 2 },
+      { "date": "04-07", "name": "World Health Day",             "tier": 1 },
+      { "date": "06-21", "name": "International Yoga Day",       "tier": 2 },
+      { "date": "10-10", "name": "World Mental Health Day",      "tier": 2 }
+    ],
+    "real_estate": [
+      { "date": "05-01", "name": "International Workers' Day / Home-buying season opens", "tier": 2 },
+      { "date": "09-01", "name": "Back-to-school move-in season","tier": 2 }
+    ],
+    "beauty": [
+      { "date": "03-08", "name": "International Women's Day",    "tier": 1 },
+      { "date": "05-10", "name": "Mother's Day (varies)",        "tier": 1 },
+      { "date": "10-13", "name": "World Sight Day",              "tier": 3 }
+    ],
+    "finance": [
+      { "date": "04-15", "name": "Tax Day (US)",                 "tier": 2 },
+      { "date": "11-04", "name": "National Financial Literacy Day", "tier": 2 }
+    ],
+    "marketing": [
+      { "date": "04-26", "name": "World Intellectual Property Day", "tier": 3 },
+      { "date": "09-28", "name": "International Day for Universal Access to Information", "tier": 3 }
+    ],
+    "default": [
+      { "date": "01-01", "name": "New Year's Day",               "tier": 1 },
+      { "date": "02-14", "name": "Valentine's Day",              "tier": 1 },
+      { "date": "03-17", "name": "St. Patrick's Day",            "tier": 3 },
+      { "date": "10-31", "name": "Halloween",                    "tier": 2 },
+      { "date": "12-25", "name": "Christmas Day",                "tier": 1 },
+      { "date": "12-31", "name": "New Year's Eve",               "tier": 2 }
+    ]
+  },
+  "industry_aliases": {
+    "b2b software / saas":  "saas",
+    "b2b saas":             "saas",
+    "saas":                 "saas",
+    "software development": "software",
+    "software":             "software",
+    "it services":          "software",
+    "it solutions":         "software",
+    "e-commerce":           "ecommerce",
+    "ecommerce":            "ecommerce",
+    "online retail":        "ecommerce",
+    "retail":               "retail",
+    "restaurant":           "food",
+    "food":                 "food",
+    "cafe":                 "food",
+    "bakery":               "food",
+    "gym":                  "fitness",
+    "fitness":              "fitness",
+    "personal training":    "fitness",
+    "yoga studio":          "fitness",
+    "real estate":          "real_estate",
+    "property":             "real_estate",
+    "salon":                "beauty",
+    "beauty":               "beauty",
+    "cosmetics":            "beauty",
+    "skincare":             "beauty",
+    "finance":              "finance",
+    "accounting":           "finance",
+    "marketing":            "marketing",
+    "advertising":          "marketing",
+    "agency":               "marketing"
+  }
+}

@@ -1040,6 +1040,80 @@ tr.clickable:hover { background: var(--surface-2); }
 .field-icon input { padding-left: 38px; }
 
 /* ============================================================
+   MONTH GRID (calendar view for a content plan)
+   ============================================================ */
+.view-toggle { display: flex; gap: 4px; }
+.month-grid-wrap { margin-top: 4px; }
+.month-grid-head {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.month-grid-wday {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  text-align: center;
+  padding: 4px 2px;
+}
+.month-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+.month-grid-cell {
+  min-height: 72px;
+  padding: 4px 5px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.month-grid-cell.blank { background: transparent; border: none; }
+.month-grid-date {
+  font-size: 11px; color: var(--text-dim);
+  font-weight: 600;
+  line-height: 1;
+  margin-bottom: 2px;
+}
+.month-grid-item {
+  display: flex; align-items: center; gap: 4px;
+  padding: 2px 6px;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  font-size: 10px;
+  color: var(--text);
+  cursor: pointer;
+  line-height: 1.2;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.month-grid-item:hover { background: var(--surface-2); }
+.month-grid-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+.month-grid-title {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-dim);
+}
+/* Status color variants — reuse our badge color scheme */
+.month-grid-item.item-new       { border-left-color: #a5b4fc; color: #a5b4fc; }
+.month-grid-item.item-contacted { border-left-color: #67e8f9; color: #67e8f9; }
+.month-grid-item.item-qualified { border-left-color: #fcd34d; color: #fcd34d; }
+.month-grid-item.item-won       { border-left-color: #86efac; color: #86efac; }
+.month-grid-item.item-lost      { border-left-color: #fca5a5; color: #fca5a5; }
+
+/* ============================================================
    RESPONSIVE
    ============================================================ */
 @media (max-width: 860px) {

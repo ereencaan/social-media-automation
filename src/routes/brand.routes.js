@@ -168,4 +168,69 @@ router.delete('/logo', (req, res) => {
   res.json(getSettings(req.user.orgId));
 });
 
+// ---- Business-specific important dates ------------------------------------
+// GET  /api/brand/dates         — list
+// POST /api/brand/dates         — create { month, day, name, note?, tier?, annual? }
+// PUT  /api/brand/dates/:id     — update
+// DELETE /api/brand/dates/:id   — remove
+const { generateId } = require('../utils/helpers');
+
+const DATE_UPDATABLE = ['month', 'day', 'name', 'note', 'tier', 'annual'];
+
+function validateDateInput(body) {
+  const m = Number(body.month);
+  const d = Number(body.day);
+  if (!Number.isInteger(m) || m < 1 || m > 12) throw new Error('month must be 1-12');
+  if (!Number.isInteger(d) || d < 1 || d > 31) throw new Error('day must be 1-31');
+  if (!body.name || !String(body.name).trim()) throw new Error('name is required');
+}
+
+router.get('/dates', (req, res) => {
+  const rows = prepare(
+    'SELECT * FROM brand_special_dates WHERE org_id = ? ORDER BY month ASC, day ASC'
+  ).all(req.user.orgId);
+  res.json(rows);
+});
+
+router.post('/dates', (req, res) => {
+  try {
+    validateDateInput(req.body || {});
+    const id = generateId();
+    prepare(`
+      INSERT INTO brand_special_dates (id, org_id, month, day, name, note, tier, annual)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id, req.user.orgId,
+      Number(req.body.month), Number(req.body.day),
+      String(req.body.name).trim(),
+      req.body.note ? String(req.body.note).trim() : null,
+      Number.isFinite(Number(req.body.tier)) ? Math.max(1, Math.min(3, Number(req.body.tier))) : 1,
+      req.body.annual === false || req.body.annual === 0 ? 0 : 1,
+    );
+    res.status(201).json(prepare('SELECT * FROM brand_special_dates WHERE id = ?').get(id));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+router.put('/dates/:id', (req, res) => {
+  const sets = [], vals = [];
+  for (const k of DATE_UPDATABLE) {
+    if (k in req.body) {
+      sets.push(`${k} = ?`);
+      vals.push(k === 'annual' ? (req.body[k] ? 1 : 0) : req.body[k]);
+    }
+  }
+  if (!sets.length) return res.status(400).json({ error: 'No updatable fields' });
+  vals.push(req.params.id, req.user.orgId);
+  const result = prepare(`UPDATE brand_special_dates SET ${sets.join(', ')} WHERE id = ? AND org_id = ?`).run(...vals);
+  if (!result.changes) return res.status(404).json({ error: 'Not found' });
+  res.json(prepare('SELECT * FROM brand_special_dates WHERE id = ? AND org_id = ?').get(req.params.id, req.user.orgId));
+});
+
+router.delete('/dates/:id', (req, res) => {
+  const result = prepare('DELETE FROM brand_special_dates WHERE id = ? AND org_id = ?')
+    .run(req.params.id, req.user.orgId);
+  if (!result.changes) return res.status(404).json({ error: 'Not found' });
+  res.json({ ok: true });
+});
+
 module.exports = router;

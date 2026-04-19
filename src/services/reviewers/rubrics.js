@@ -45,6 +45,28 @@ const RUBRICS = {
     ],
   },
 
+  // Monthly content plan — not a single post but a whole calendar
+  content_plan: {
+    axes: [
+      { key: 'distribution',   label: 'Distribution', weight: 0.20,
+        desc: 'Are the posts well-spread across the month? Not clustered, not gappy. Weekends used appropriately.' },
+      { key: 'variety',        label: 'Variety',      weight: 0.25,
+        desc: 'Mix of themes (educational/promotional/community/seasonal/behind-the-scenes). No repetition of the same topic angle.' },
+      { key: 'brand_fit',      label: 'Brand fit',    weight: 0.30,
+        desc: 'Every item obviously ties to THIS business\'s services and audience. No generic fillers.' },
+      { key: 'special_day_use',label: 'Special days', weight: 0.15,
+        desc: 'Relevant holidays/industry days are used — once each, in a way that connects to the business. Irrelevant ones are skipped.' },
+      { key: 'platform_fit',   label: 'Platform fit', weight: 0.10,
+        desc: 'Platform mix matches the request. Each topic picked a sensible platform for its format.' },
+    ],
+    systemExtras: [
+      'You are grading a monthly content calendar as a whole, not individual posts.',
+      'Penalize clumping (3 posts on Monday, nothing Tues-Thu).',
+      'Penalize forced holiday tie-ins (e.g. a B2B SaaS posting about Valentine\'s day with no clear business angle).',
+      'Penalize when most items could have been written for any business in the same industry.',
+    ],
+  },
+
   // User prompt pre-analysis (check before an expensive generation)
   prompt_quality: {
     axes: [

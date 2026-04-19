@@ -221,6 +221,7 @@ function navigate(route, { replace = false } = {}) {
     dashboard: 'Dashboard',
     leads: 'Leads',
     posts: 'Posts',
+    calendar: 'Content calendar',
     brand: 'Brand',
     settings: 'Settings',
   };
@@ -813,7 +814,7 @@ VIEWS.posts = async function postsView(root, myGen) {
   const promptTextarea = el('textarea', {
     name: 'prompt', required: true, rows: 3,
     placeholder: hasBizProfile
-      ? 'e.g. Valentine\'s day sale — 50% off this week.  (We\'ll make it fit your business automatically.)'
+      ? 'e.g. Weekly tip, product announcement, customer story, seasonal campaign, event reminder…  (We\'ll tailor it to your business automatically.)'
       : 'e.g. Announce our Q2 product launch with a confident, premium tone.',
   });
   const analyzeBtn = el('button', {
@@ -1384,6 +1385,511 @@ function closePostPreview() {
 }
 
 // =======================================================================
+//   VIEW: CALENDAR (content plans)
+// =======================================================================
+VIEWS.calendar = async function calendarView(root, myGen) {
+  // Topbar action: create new plan
+  $('#topbar-actions').appendChild(el('button', {
+    class: 'btn btn-primary',
+    onclick: () => openPlanWizard(),
+  }, '+ New monthly plan'));
+
+  root.innerHTML = '<div class="loading"></div>';
+  let plans = [];
+  try { plans = await api('/api/plans'); } catch (e) { toast(e.message, 'error'); }
+  if (stale(myGen)) return;
+
+  root.innerHTML = '';
+  if (!plans.length) {
+    root.appendChild(el('div', { class: 'card' },
+      el('div', { class: 'empty-state' },
+        el('h3', {}, 'No content plans yet'),
+        el('p', {}, 'Let AI build a monthly calendar for you — tailored to your business, the month\'s holidays, and your target audience.'),
+        el('button', { class: 'btn btn-primary', onclick: () => openPlanWizard() }, '+ Create your first plan'),
+      ),
+    ));
+    return;
+  }
+
+  // Group plans by month
+  const monthLabel = (m) => {
+    const [y, mo] = m.split('-').map(Number);
+    return new Date(y, mo - 1, 1).toLocaleString(undefined, { month: 'long', year: 'numeric' });
+  };
+
+  const grid = el('div', { style: 'display:flex; flex-direction:column; gap:14px' });
+  for (const p of plans) {
+    grid.appendChild(el('div', {
+      class: 'card clickable',
+      style: 'cursor:pointer; display:flex; align-items:center; gap:18px; padding:18px',
+      onclick: () => openPlanDetail(p.id),
+    },
+      el('div', {
+        style: 'width:60px; height:60px; border-radius:12px; background:var(--accent-soft); color:var(--accent-hover); display:flex; align-items:center; justify-content:center; font-size:22px; flex-shrink:0',
+      }, '🗓'),
+      el('div', { style: 'flex:1' },
+        el('div', { style: 'font-size:15px; font-weight:600' }, monthLabel(p.month)),
+        el('div', { class: 'section-sub', style: 'margin-top:2px' },
+          `${p.target_count} posts · ${p.mode} · `,
+          el('span', { class: `badge badge-${p.status === 'active' ? 'new' : p.status === 'completed' ? 'won' : 'contacted'}` }, p.status),
+          p.auto_publish ? el('span', { class: 'quality-chip', style: 'margin-left:6px' }, '⚡ auto-publish') : null,
+        ),
+      ),
+      el('div', { style: 'color:var(--text-dim); font-size:13px' }, formatDate(p.created_at, { dateOnly: true })),
+    ));
+  }
+  root.appendChild(grid);
+};
+
+// ---- Plan creation wizard ------------------------------------------------
+function openPlanWizard() {
+  const backdrop = el('div', { class: 'modal-backdrop', onclick: (e) => {
+    if (e.target === backdrop) closePlanWizard();
+  } });
+  const modal = el('div', { class: 'modal', style: 'max-width: 900px' });
+  backdrop.appendChild(modal);
+  document.body.appendChild(backdrop);
+  document.body.style.overflow = 'hidden';
+  const onKey = (e) => { if (e.key === 'Escape') closePlanWizard(); };
+  document.addEventListener('keydown', onKey);
+  backdrop._onKey = onKey;
+
+  let preview = null;   // { plan, quality, specialDays } after Generate
+  let form = { month: defaultNextMonth(), targetCount: 12, mode: 'hybrid', instagramPct: 60, linkedinPct: 40, extra: '' };
+  let autoPublish = false;
+
+  function defaultNextMonth() {
+    const d = new Date();
+    d.setMonth(d.getMonth() + 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
+
+  const render = () => {
+    modal.innerHTML = '';
+    modal.appendChild(el('div', { class: 'modal-header' },
+      el('div', { class: 'modal-title' }, preview ? 'Review your plan' : 'Create monthly plan'),
+      el('button', { class: 'icon-btn', onclick: closePlanWizard, 'aria-label': 'Close' }, '✕'),
+    ));
+
+    const body = el('div', { style: 'padding:20px; overflow-y:auto; flex:1; min-height:0' });
+
+    if (!preview) {
+      // ---- FORM ----
+      const monthInput = el('input', { type: 'month', name: 'month', value: form.month });
+      monthInput.oninput = () => { form.month = monthInput.value; };
+      const countInput = el('input', { type: 'number', name: 'targetCount', min: '1', max: '60', value: String(form.targetCount) });
+      countInput.oninput = () => { form.targetCount = Number(countInput.value) || 10; };
+      const modeSelect = (() => {
+        const s = el('select', { name: 'mode' });
+        [
+          ['calendar', 'Calendar-driven (prioritize special days)'],
+          ['quota', 'Quota (just N posts, AI picks themes)'],
+          ['hybrid', 'Hybrid (both)'],
+        ].forEach(([v, t]) => {
+          const o = el('option', { value: v }, t);
+          if (v === form.mode) o.selected = true;
+          s.appendChild(o);
+        });
+        s.onchange = () => { form.mode = s.value; };
+        return s;
+      })();
+
+      body.appendChild(el('div', { class: 'row' },
+        el('div', { class: 'field' }, el('label', {}, 'Month', monthInput)),
+        el('div', { class: 'field' }, el('label', {}, 'Number of posts', countInput)),
+      ));
+      body.appendChild(el('div', { class: 'field' }, el('label', {}, 'Planning mode', modeSelect)));
+
+      // Platform mix
+      const igInput = el('input', { type: 'number', min: '0', max: '100', value: String(form.instagramPct), style: 'width: 80px' });
+      const liInput = el('input', { type: 'number', min: '0', max: '100', value: String(form.linkedinPct), style: 'width: 80px' });
+      igInput.oninput = () => { form.instagramPct = Number(igInput.value) || 0; liInput.value = String(100 - form.instagramPct); form.linkedinPct = 100 - form.instagramPct; };
+      liInput.oninput = () => { form.linkedinPct = Number(liInput.value) || 0; igInput.value = String(100 - form.linkedinPct); form.instagramPct = 100 - form.linkedinPct; };
+      body.appendChild(el('div', { class: 'field' },
+        el('label', {}, 'Platform mix (%)'),
+        el('div', { style: 'display:flex; gap:12px; align-items:center' },
+          el('span', {}, '📷 Instagram'), igInput,
+          el('span', {}, '💼 LinkedIn'), liInput,
+        ),
+      ));
+
+      // Extra constraints (free-form)
+      const extraTxt = el('textarea', { rows: 2, placeholder: 'Optional: "avoid salesy tone", "emphasize case studies", "post on Tuesday/Thursday preferably"...' }, form.extra);
+      extraTxt.oninput = () => { form.extra = extraTxt.value; };
+      body.appendChild(el('div', { class: 'field' }, el('label', {}, 'Extra constraints (optional)', extraTxt)));
+
+      body.appendChild(el('div', { class: 'form-actions' },
+        el('button', { class: 'btn btn-ghost', onclick: closePlanWizard }, 'Cancel'),
+        el('button', { class: 'btn btn-primary', onclick: async () => {
+          const btn = body.querySelector('.btn-primary');
+          btn.disabled = true;
+          btn.innerHTML = '<span class="loading"></span> AI is drafting + reviewing…';
+          try {
+            const result = await api('/api/plans/preview', {
+              method: 'POST',
+              body: {
+                month: form.month,
+                targetCount: form.targetCount,
+                mode: form.mode,
+                platformMix: {
+                  instagram: form.instagramPct / 100,
+                  linkedin:  form.linkedinPct / 100,
+                },
+                constraints: { extra: form.extra },
+              },
+            });
+            preview = result;
+            render();
+          } catch (err) {
+            toast(err.message, 'error');
+          } finally { btn.disabled = false; btn.innerHTML = '✨ Generate plan'; }
+        } }, '✨ Generate plan'),
+      ));
+    } else {
+      // ---- PREVIEW ----
+      if (preview.quality) {
+        const qp = renderQualityPanel(preview.quality);
+        if (qp) body.appendChild(qp);
+      }
+
+      if (preview.specialDays && preview.specialDays.days.length) {
+        body.appendChild(el('div', { class: 'drawer-section' },
+          el('h4', {}, `Special days this month (${preview.specialDays.days.length})`),
+          el('div', { style: 'font-size:12px; color:var(--text-dim); line-height:1.7' },
+            ...preview.specialDays.days.slice(0, 10).map(d =>
+              el('div', {}, `· ${d.date} — ${d.name} (tier ${d.tier})`)
+            ),
+          ),
+        ));
+      }
+
+      body.appendChild(el('div', { class: 'drawer-section' },
+        el('h4', {}, `Plan items (${preview.plan.length})`),
+        el('div', { class: 'table-wrap', style: 'margin-top:8px' },
+          el('table', {},
+            el('thead', {}, el('tr', {},
+              el('th', {}, 'Date'),
+              el('th', {}, 'Theme'),
+              el('th', {}, 'Brief'),
+              el('th', {}, 'Platform'),
+            )),
+            el('tbody', {},
+              ...preview.plan.map(it => el('tr', {},
+                el('td', {}, formatDate(it.scheduled_for, { dateOnly: true })),
+                el('td', {}, it.theme),
+                el('td', { style: 'max-width:380px; font-size:12px' }, it.topic_brief),
+                el('td', {}, it.platforms.join(', ')),
+              )),
+            ),
+          ),
+        ),
+      ));
+
+      // Auto-publish toggle
+      body.appendChild(el('div', { class: 'field' },
+        el('label', { class: 'switch-row' },
+          el('input', { type: 'checkbox', onchange: (e) => { autoPublish = e.target.checked; } }),
+          el('span', { class: 'switch' }),
+          el('span', { class: 'switch-label' },
+            el('strong', {}, 'Auto-publish generated drafts'),
+            el('span', { class: 'switch-hint' }, 'When off (recommended), you review each draft before it goes live. Turn on once you trust the output.'),
+          ),
+        ),
+      ));
+
+      body.appendChild(el('div', { class: 'form-actions' },
+        el('button', { class: 'btn btn-ghost', onclick: () => { preview = null; render(); } }, '← Back / regenerate'),
+        el('button', { class: 'btn btn-ghost', onclick: closePlanWizard }, 'Cancel'),
+        el('button', { class: 'btn btn-primary', onclick: async () => {
+          try {
+            await api('/api/plans', {
+              method: 'POST',
+              body: {
+                month: form.month,
+                targetCount: form.targetCount,
+                mode: form.mode,
+                platformMix: { instagram: form.instagramPct / 100, linkedin: form.linkedinPct / 100 },
+                constraints: { extra: form.extra },
+                items: preview.plan,
+                autoPublish: autoPublish ? 1 : 0,
+              },
+            });
+            toast('Plan saved', 'success');
+            closePlanWizard();
+            navigate('calendar', { replace: true });
+          } catch (err) { toast(err.message, 'error'); }
+        } }, '💾 Save plan'),
+      ));
+    }
+
+    modal.appendChild(body);
+  };
+  render();
+}
+
+function closePlanWizard() {
+  const backdrops = $$('.modal-backdrop');
+  const last = backdrops[backdrops.length - 1];
+  if (!last) return;
+  if (last._onKey) document.removeEventListener('keydown', last._onKey);
+  last.remove();
+  if (!$('.modal-backdrop')) document.body.style.overflow = '';
+}
+
+// ---- Plan detail drawer --------------------------------------------------
+async function openPlanDetail(planId) {
+  const drawer = $('#drawer');
+  const backdrop = $('#drawer-backdrop');
+  drawer.classList.remove('hidden');
+  backdrop.classList.remove('hidden');
+  backdrop.onclick = closeDrawer;
+  drawer.innerHTML = '<div class="drawer-body"><div class="loading"></div></div>';
+
+  let plan;
+  try { plan = await api('/api/plans/' + planId); }
+  catch (e) { toast(e.message, 'error'); closeDrawer(); return; }
+
+  drawer.innerHTML = '';
+  drawer.appendChild(el('div', { class: 'drawer-header' },
+    el('div', {},
+      el('div', { class: 'drawer-title' }, plan.month + ' — ' + plan.target_count + ' posts'),
+      el('div', { style: 'margin-top:4px; display:flex; gap:6px; flex-wrap:wrap' },
+        el('span', { class: 'badge badge-new' }, plan.status),
+        el('span', { class: 'badge' }, plan.mode),
+        plan.auto_publish ? el('span', { class: 'quality-chip' }, '⚡ auto-publish') : null,
+      ),
+    ),
+    el('button', { class: 'icon-btn', onclick: closeDrawer }, '✕'),
+  ));
+
+  const body = el('div', { class: 'drawer-body' });
+
+  // Auto-publish toggle
+  body.appendChild(el('div', { class: 'drawer-section' },
+    el('label', { class: 'switch-row' },
+      el('input', {
+        type: 'checkbox',
+        ...(plan.auto_publish ? { checked: 'checked' } : {}),
+        onchange: async (e) => {
+          try {
+            await api('/api/plans/' + plan.id, {
+              method: 'PUT',
+              body: { auto_publish: e.target.checked ? 1 : 0 },
+            });
+            toast(e.target.checked ? 'Auto-publish ON' : 'Auto-publish OFF', 'success');
+          } catch (err) {
+            toast(err.message, 'error');
+            e.target.checked = !e.target.checked; // revert
+          }
+        },
+      }),
+      el('span', { class: 'switch' }),
+      el('span', { class: 'switch-label' },
+        el('strong', {}, 'Auto-publish approved drafts'),
+        el('span', { class: 'switch-hint' }, 'Drafts generated from this plan will publish without manual approval. Use once you trust the output.'),
+      ),
+    ),
+  ));
+
+  // View toggle: list vs grid
+  let viewMode = 'list';
+  const itemsWrap = el('div', { class: 'drawer-section' });
+  const renderItems = () => {
+    itemsWrap.innerHTML = '';
+    const header = el('div', { style: 'display:flex; justify-content:space-between; align-items:center; margin-bottom:10px' },
+      el('h4', { style: 'margin:0' }, `Plan items (${plan.items.length})`),
+      el('div', { class: 'view-toggle' },
+        el('button', {
+          class: 'btn btn-sm ' + (viewMode === 'list' ? 'btn-primary' : 'btn-ghost'),
+          onclick: () => { viewMode = 'list'; renderItems(); },
+        }, '☰ List'),
+        el('button', {
+          class: 'btn btn-sm ' + (viewMode === 'grid' ? 'btn-primary' : 'btn-ghost'),
+          onclick: () => { viewMode = 'grid'; renderItems(); },
+        }, '🗓 Grid'),
+      ),
+    );
+    itemsWrap.appendChild(header);
+
+    if (viewMode === 'list') {
+      const list = el('div', { style: 'display:flex; flex-direction:column; gap:8px' },
+        ...plan.items.map(it => renderPlanItemCard(plan, it, () => openPlanDetail(plan.id))),
+      );
+      itemsWrap.appendChild(list);
+    } else {
+      itemsWrap.appendChild(renderMonthGrid(plan));
+    }
+  };
+  body.appendChild(itemsWrap);
+  renderItems();
+
+  // Delete plan
+  body.appendChild(el('div', { class: 'drawer-section' },
+    el('button', { class: 'btn btn-danger btn-sm', onclick: async () => {
+      if (!confirm('Delete this plan and all its items? This cannot be undone.')) return;
+      try {
+        await api('/api/plans/' + plan.id, { method: 'DELETE' });
+        toast('Plan deleted', 'success');
+        closeDrawer();
+        navigate('calendar', { replace: true });
+      } catch (err) { toast(err.message, 'error'); }
+    } }, 'Delete plan'),
+  ));
+
+  drawer.appendChild(body);
+}
+
+function renderPlanItemCard(plan, it, refresh) {
+  const actions = el('div', { style: 'display:flex; gap:6px; flex-wrap:wrap; margin-top:8px' });
+
+  // What actions are valid depends on status
+  if (it.status === 'planned' || it.status === 'failed') {
+    actions.appendChild(el('button', {
+      class: 'btn btn-ghost btn-sm',
+      onclick: async (e) => { await runAction(e.currentTarget, `/api/plans/${plan.id}/items/${it.id}/generate-now`, '⚙ Generating…', refresh); },
+    }, '⚙ Generate now'));
+  }
+  if (it.status === 'draft' && it.post_id) {
+    actions.appendChild(el('button', {
+      class: 'btn btn-primary btn-sm',
+      onclick: async (e) => { await runAction(e.currentTarget, `/api/plans/${plan.id}/items/${it.id}/approve`, 'Approving…', refresh); },
+    }, '✓ Approve'));
+    actions.appendChild(el('button', {
+      class: 'btn btn-ghost btn-sm',
+      onclick: () => { if (it.post_id) openPostPreviewById(it.post_id); },
+    }, '👁 Preview draft'));
+  }
+  if ((it.status === 'approved' || it.status === 'draft') && it.post_id) {
+    actions.appendChild(el('button', {
+      class: 'btn btn-ghost btn-sm',
+      onclick: async (e) => {
+        if (!confirm('Publish this post right now, skipping the scheduled time?')) return;
+        await runAction(e.currentTarget, `/api/plans/${plan.id}/items/${it.id}/publish-now`, '🚀 Publishing…', refresh);
+      },
+    }, '🚀 Publish now'));
+  }
+  if (it.status !== 'published' && it.status !== 'skipped') {
+    actions.appendChild(el('button', {
+      class: 'btn btn-ghost btn-sm',
+      style: 'color: var(--text-dim)',
+      onclick: async (e) => {
+        if (!confirm('Skip this item? It won\'t be generated or published.')) return;
+        await runAction(e.currentTarget, `/api/plans/${plan.id}/items/${it.id}/skip`, 'Skipping…', refresh);
+      },
+    }, 'Skip'));
+  }
+
+  return el('div', {
+    style: `padding:10px 12px; background:var(--bg-soft); border:1px solid var(--border-soft); border-radius:var(--radius); ${it.status === 'skipped' ? 'opacity:0.55' : ''}`,
+  },
+    el('div', { style: 'display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; gap:8px' },
+      el('span', { style: 'font-weight:600; font-size:13px' },
+        formatDate(it.scheduled_for, { dateOnly: true }) + ' — ' + it.theme),
+      el('span', { class: `badge badge-${statusBadgeClass(it.status)}` }, it.status),
+    ),
+    el('div', { style: 'font-size:12px; color:var(--text); margin-bottom:4px' }, it.topic_brief),
+    it.reasoning ? el('div', { style: 'font-size:11px; color:var(--text-dim); font-style:italic' }, '→ ' + it.reasoning) : null,
+    el('div', { style: 'font-size:11px; color:var(--text-mute); margin-top:4px' }, it.platforms.join(', ')),
+    it.error ? el('div', { style: 'font-size:11px; color:var(--danger); margin-top:4px' }, '⚠ ' + it.error) : null,
+    actions,
+  );
+}
+
+async function runAction(btn, url, busyLabel, refresh) {
+  btn.disabled = true;
+  const original = btn.innerHTML;
+  btn.innerHTML = `<span class="loading"></span> ${busyLabel}`;
+  try {
+    await api(url, { method: 'POST' });
+    toast('Done', 'success');
+    if (refresh) await refresh();
+  } catch (err) {
+    toast(err.message, 'error');
+    btn.disabled = false;
+    btn.innerHTML = original;
+  }
+}
+
+async function openPostPreviewById(postId) {
+  try {
+    const post = await api('/api/posts/' + postId);
+    openPostPreview(post);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+// ---- Month grid renderer -------------------------------------------------
+// Renders the plan's month as a 7-col calendar grid. Each cell shows the
+// day number; items scheduled that day appear as clickable chips.
+function renderMonthGrid(plan) {
+  const [y, m] = plan.month.split('-').map(Number);   // e.g. 2026, 5
+  const firstDay = new Date(Date.UTC(y, m - 1, 1));
+  const lastDay  = new Date(Date.UTC(y, m, 0));      // day 0 of next month = last of this
+  const daysInMonth = lastDay.getUTCDate();
+  // Calendar grids show Mon-first in most of the world; adjust if needed
+  // 0=Sun 1=Mon ... -> we want Mon-first: (dow + 6) % 7
+  const leadingBlanks = (firstDay.getUTCDay() + 6) % 7;
+
+  // Group items by day number
+  const byDay = new Map();
+  for (const it of plan.items) {
+    const d = new Date(it.scheduled_for);
+    if (d.getUTCFullYear() !== y || d.getUTCMonth() !== m - 1) continue;
+    const key = d.getUTCDate();
+    if (!byDay.has(key)) byDay.set(key, []);
+    byDay.get(key).push(it);
+  }
+
+  const wrap = el('div', { class: 'month-grid-wrap' });
+
+  // Weekday header
+  const weekdays = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const headRow = el('div', { class: 'month-grid-head' },
+    ...weekdays.map(w => el('div', { class: 'month-grid-wday' }, w)));
+  wrap.appendChild(headRow);
+
+  const grid = el('div', { class: 'month-grid' });
+  for (let i = 0; i < leadingBlanks; i++) {
+    grid.appendChild(el('div', { class: 'month-grid-cell blank' }));
+  }
+  for (let day = 1; day <= daysInMonth; day++) {
+    const cell = el('div', { class: 'month-grid-cell' });
+    cell.appendChild(el('div', { class: 'month-grid-date' }, String(day)));
+    const items = byDay.get(day) || [];
+    for (const it of items) {
+      cell.appendChild(el('div', {
+        class: `month-grid-item item-${statusBadgeClass(it.status)}`,
+        title: it.topic_brief,
+        onclick: (e) => {
+          e.stopPropagation();
+          // Scroll to and highlight the item in the list view
+          if (it.post_id) { openPostPreviewById(it.post_id); }
+          else toast(it.topic_brief + ' — ' + it.status, 'info');
+        },
+      },
+        el('span', { class: 'month-grid-dot' }),
+        el('span', { class: 'month-grid-title' }, it.theme || ''),
+      ));
+    }
+    grid.appendChild(cell);
+  }
+  wrap.appendChild(grid);
+  return wrap;
+}
+
+function statusBadgeClass(status) {
+  return {
+    planned:    'new',
+    generating: 'contacted',
+    draft:      'qualified',
+    approved:   'contacted',
+    publishing: 'contacted',
+    published:  'won',
+    failed:     'lost',
+    skipped:    'lost',
+  }[status] || 'new';
+}
+
+// =======================================================================
 //   VIEW: BRAND
 // =======================================================================
 VIEWS.brand = async function brandView(root, myGen) {
@@ -1692,6 +2198,98 @@ VIEWS.brand = async function brandView(root, myGen) {
   };
   bizCard.appendChild(bizForm);
   root.appendChild(bizCard);
+
+  // ---- IMPORTANT DATES CARD ----
+  const datesCard = el('div', { class: 'card', style: 'margin-top:20px' });
+  datesCard.appendChild(el('div', { class: 'section-header' },
+    el('h2', {}, 'Important dates'),
+    el('div', { class: 'section-sub' }, 'Company anniversaries, launches, events — AI uses these when planning your monthly content.'),
+  ));
+
+  const datesList = el('div', { style: 'display:flex; flex-direction:column; gap:8px; margin-bottom:12px' });
+  datesCard.appendChild(datesList);
+
+  async function refreshDates() {
+    datesList.innerHTML = '';
+    try {
+      const dates = await api('/api/brand/dates');
+      if (!dates.length) {
+        datesList.appendChild(el('div', { style: 'color:var(--text-dim); font-size:13px; padding:10px' },
+          'No important dates yet. Add your company\'s anniversary, product launch days, recurring events…'));
+        return;
+      }
+      const monthName = (m) => new Date(2000, m - 1, 1).toLocaleString(undefined, { month: 'long' });
+      dates.forEach(d => {
+        datesList.appendChild(el('div', {
+          style: 'display:flex; align-items:center; gap:10px; padding:10px 12px; background:var(--bg-soft); border:1px solid var(--border-soft); border-radius:var(--radius)',
+        },
+          el('div', { style: 'font-size:11px; text-align:center; min-width:48px; color:var(--accent-hover)' },
+            el('div', { style: 'font-weight:700; font-size:18px' }, String(d.day)),
+            el('div', { style: 'text-transform:uppercase; letter-spacing:0.05em' }, monthName(d.month).slice(0,3)),
+          ),
+          el('div', { style: 'flex:1' },
+            el('div', { style: 'font-weight:600; font-size:14px' }, d.name),
+            d.note ? el('div', { style: 'font-size:12px; color:var(--text-dim)' }, d.note) : null,
+            el('div', { style: 'font-size:11px; color:var(--text-mute); margin-top:2px' },
+              (d.annual ? 'Every year' : 'One-off') + ' · Tier ' + d.tier),
+          ),
+          el('button', {
+            class: 'icon-btn', title: 'Remove',
+            onclick: async () => {
+              if (!confirm('Remove this date?')) return;
+              try { await api('/api/brand/dates/' + d.id, { method: 'DELETE' }); refreshDates(); } catch (e) { toast(e.message, 'error'); }
+            },
+          }, '✕'),
+        ));
+      });
+    } catch (err) { toast(err.message, 'error'); }
+  }
+  refreshDates();
+
+  // Add-date form
+  const addForm = el('form', { class: 'row' });
+  const nameIn  = el('input', { type: 'text', name: 'name', placeholder: 'e.g. Company anniversary', required: true });
+  const monthIn = (() => {
+    const s = el('select', { name: 'month', required: true });
+    ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].forEach((lbl, i) => {
+      s.appendChild(el('option', { value: String(i + 1) }, lbl));
+    });
+    return s;
+  })();
+  const dayIn = el('input', { type: 'number', name: 'day', min: '1', max: '31', placeholder: 'Day', required: true, style: 'width:80px' });
+  const tierIn = (() => {
+    const s = el('select', { name: 'tier' });
+    [['1','Must-consider'],['2','Strong'],['3','Nice-to-have']].forEach(([v,t])=>s.appendChild(el('option',{value:v},t)));
+    return s;
+  })();
+  const addBtn = el('button', { type: 'submit', class: 'btn btn-primary btn-sm' }, '+ Add');
+  addForm.appendChild(el('div', { class: 'field' }, el('label', {}, 'Name', nameIn)));
+  addForm.appendChild(el('div', { style: 'display:flex; gap:8px; align-items:end' },
+    el('div', { class: 'field', style: 'flex:1; margin-bottom:0' }, el('label', {}, 'Month', monthIn)),
+    el('div', { class: 'field', style: 'margin-bottom:0' }, el('label', {}, 'Day', dayIn)),
+    el('div', { class: 'field', style: 'flex:1; margin-bottom:0' }, el('label', {}, 'Tier', tierIn)),
+    addBtn,
+  ));
+  addForm.onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      await api('/api/brand/dates', {
+        method: 'POST',
+        body: {
+          name:  nameIn.value.trim(),
+          month: Number(monthIn.value),
+          day:   Number(dayIn.value),
+          tier:  Number(tierIn.value),
+          annual: true,
+        },
+      });
+      nameIn.value = ''; dayIn.value = '';
+      refreshDates();
+      toast('Date added', 'success');
+    } catch (err) { toast(err.message, 'error'); }
+  };
+  datesCard.appendChild(addForm);
+  root.appendChild(datesCard);
 };
 
 // =======================================================================
