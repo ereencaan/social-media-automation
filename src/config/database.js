@@ -268,6 +268,39 @@ async function init() {
   `);
   db.run(`CREATE INDEX IF NOT EXISTS idx_brand_dates_org ON brand_special_dates(org_id)`);
 
+  // ---- Per-org social platform credentials --------------------------------
+  // Replaces the single-tenant .env-based tokens. Each customer runs OAuth
+  // against their own IG / FB / LinkedIn account and we store the result
+  // here, one row per (org, platform, account). 'account_id' distinguishes
+  // multiple pages / accounts — e.g. an agency with 3 FB pages would have
+  // 3 rows.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS social_credentials (
+      id                 TEXT PRIMARY KEY,
+      org_id             TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+      platform           TEXT NOT NULL,            -- 'facebook' | 'instagram' | 'linkedin'
+      account_id         TEXT,                     -- page_id (FB), ig_business_id (IG), person urn (LI)
+      account_name       TEXT,                     -- display name in UI
+      account_handle     TEXT,                     -- @handle / username
+      account_avatar_url TEXT,
+      access_token       TEXT NOT NULL,
+      refresh_token      TEXT,
+      token_type         TEXT,                     -- 'bearer' | 'page' | 'long_lived_user' | ...
+      expires_at         TEXT,                     -- ISO datetime, NULL = never expires (some FB page tokens)
+      refresh_expires_at TEXT,
+      scopes             TEXT,                     -- space-separated
+      status             TEXT NOT NULL DEFAULT 'active',  -- active | expired | revoked | needs_reauth
+      connected_at       TEXT DEFAULT (datetime('now')),
+      last_refreshed_at  TEXT,
+      last_used_at       TEXT,
+      last_error         TEXT,
+      UNIQUE(org_id, platform, account_id)
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_social_creds_org       ON social_credentials(org_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_social_creds_org_plat  ON social_credentials(org_id, platform)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_social_creds_expiry    ON social_credentials(expires_at)`);
+
   flush();
   return db;
 }

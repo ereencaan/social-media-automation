@@ -36,6 +36,7 @@ app.use('/api/posts', requireAuth, require('./routes/posts.routes'));
 app.use('/api/brand', requireAuth, require('./routes/brand.routes'));
 app.use('/api/leads', requireAuth, require('./routes/leads.routes'));
 app.use('/api/plans', requireAuth, require('./routes/plans.routes'));
+app.use('/api/connect', requireAuth, require('./routes/connect.routes'));
 
 // Health check
 app.get('/api/health', (req, res) => {

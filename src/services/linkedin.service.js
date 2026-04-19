@@ -1,4 +1,5 @@
 const LINKEDIN_API = 'https://api.linkedin.com';
+const credsService = require('./social-credentials.service');
 
 async function getLinkedInPersonId(token) {
   const res = await fetch(`${LINKEDIN_API}/v2/userinfo`, {
@@ -9,37 +10,62 @@ async function getLinkedInPersonId(token) {
   return data.sub;
 }
 
-async function postToLinkedIn(imageUrl, text) {
-  const token = process.env.LINKEDIN_ACCESS_TOKEN;
-  const orgId = process.env.LINKEDIN_ORGANIZATION_ID;
+function resolveCredential(callerOrgId) {
+  if (callerOrgId) {
+    const row = credsService.getActive(callerOrgId, 'linkedin');
+    if (row) return {
+      token: row.access_token,
+      personUrnSuffix: row.account_id || null,
+      orgId: null,
+      credId: row.id,
+    };
+  }
+  if (process.env.LINKEDIN_ACCESS_TOKEN) {
+    return {
+      token: process.env.LINKEDIN_ACCESS_TOKEN,
+      personUrnSuffix: null,
+      orgId: process.env.LINKEDIN_ORGANIZATION_ID || null,
+      credId: null,
+    };
+  }
+  return null;
+}
 
-  // Determine author: use organization if w_organization_social scope available, else personal profile
+async function postToLinkedIn(imageUrl, text, opts = {}) {
+  const cred = resolveCredential(opts.orgId);
+  if (!cred) throw new Error('No LinkedIn credential — connect LinkedIn in Settings → Connections');
+  const token = cred.token;
+  const orgId = cred.orgId;
+
+  // Determine author. If the DB credential already captured the person URN,
+  // use that. Otherwise try organization (legacy env flow) then fallback.
   let author;
   try {
-    // Try organization first
-    author = `urn:li:organization:${orgId}`;
-    const testRes = await fetch(`${LINKEDIN_API}/rest/images?action=initializeUpload`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        'LinkedIn-Version': '202401',
-        'X-Restli-Protocol-Version': '2.0.0'
-      },
-      body: JSON.stringify({
-        initializeUploadRequest: { owner: author }
-      })
-    });
-
-    if (!testRes.ok) {
-      // Fallback to personal profile
+    if (cred.personUrnSuffix) {
+      author = `urn:li:person:${cred.personUrnSuffix}`;
+    } else if (orgId) {
+      author = `urn:li:organization:${orgId}`;
+      const testRes = await fetch(`${LINKEDIN_API}/rest/images?action=initializeUpload`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'LinkedIn-Version': '202401',
+          'X-Restli-Protocol-Version': '2.0.0',
+        },
+        body: JSON.stringify({ initializeUploadRequest: { owner: author } }),
+      });
+      if (!testRes.ok) {
+        const personId = await getLinkedInPersonId(token);
+        author = `urn:li:person:${personId}`;
+      } else {
+        const registerData = await testRes.json();
+        const { uploadUrl, image: imageUrn } = registerData.value;
+        return await completeLinkedInPost(token, author, imageUrl, text, uploadUrl, imageUrn);
+      }
+    } else {
       const personId = await getLinkedInPersonId(token);
       author = `urn:li:person:${personId}`;
-    } else {
-      // Organization upload worked, use that response
-      const registerData = await testRes.json();
-      const { uploadUrl, image: imageUrn } = registerData.value;
-      return await completeLinkedInPost(token, author, imageUrl, text, uploadUrl, imageUrn);
     }
   } catch {
     const personId = await getLinkedInPersonId(token);
@@ -64,7 +90,14 @@ async function postToLinkedIn(imageUrl, text) {
   if (!registerData.value) throw new Error(`LinkedIn register error: ${JSON.stringify(registerData)}`);
 
   const { uploadUrl, image: imageUrn } = registerData.value;
-  return await completeLinkedInPost(token, author, imageUrl, text, uploadUrl, imageUrn);
+  try {
+    return await completeLinkedInPost(token, author, imageUrl, text, uploadUrl, imageUrn);
+  } catch (err) {
+    if (cred.credId && /401|invalid_token|expired|REVOKED_ACCESS_TOKEN/i.test(err.message)) {
+      credsService.markNeedsReauth(cred.credId, err.message);
+    }
+    throw err;
+  }
 }
 
 async function completeLinkedInPost(token, author, imageUrl, text, uploadUrl, imageUrn) {

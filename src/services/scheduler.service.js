@@ -21,14 +21,14 @@ const activeJobs = new Map();
 const platformPosters = {
   instagram: (post) => {
     const caption = `${post.caption}\n\n${post.hashtags}`;
-    return postToInstagram(post.drive_url, caption);
+    return postToInstagram(post.drive_url, caption, { orgId: post.org_id });
   },
   facebook: (post) => {
     const message = `${post.caption}\n\n${post.hashtags}`;
-    return postToFacebook(post.drive_url, message);
+    return postToFacebook(post.drive_url, message, { orgId: post.org_id });
   },
   linkedin: (post) => {
-    return postToLinkedIn(post.drive_url, post.caption);
+    return postToLinkedIn(post.drive_url, post.caption, { orgId: post.org_id });
   }
 };
 

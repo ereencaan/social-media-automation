@@ -2323,9 +2323,11 @@ VIEWS.brand = async function brandView(root, myGen) {
 // =======================================================================
 //   VIEW: SETTINGS
 // =======================================================================
-VIEWS.settings = async function settingsView(root) {
+VIEWS.settings = async function settingsView(root, myGen) {
   const u = State.user;
   root.innerHTML = '';
+
+  // ---- Account card ----
   const card = el('div', { class: 'card' });
   card.appendChild(el('div', { class: 'section-header' },
     el('h2', {}, 'Account'),
@@ -2346,7 +2348,119 @@ VIEWS.settings = async function settingsView(root) {
     } }, 'Log out'),
   ));
   root.appendChild(card);
+
+  // ---- Connections card ----
+  const connCard = el('div', { class: 'card', style: 'margin-top:20px' });
+  connCard.appendChild(el('div', { class: 'section-header' },
+    el('h2', {}, 'Connections'),
+    el('div', { class: 'section-sub' }, 'Connect your social accounts so Hitra can publish on your behalf.'),
+  ));
+  const connBody = el('div');
+  connCard.appendChild(connBody);
+  root.appendChild(connCard);
+
+  // Handle OAuth callback result (hash carries query-string-looking params after '#settings/connections?...')
+  const hashQuery = location.hash.includes('?') ? location.hash.split('?')[1] : '';
+  if (hashQuery) {
+    const params = new URLSearchParams(hashQuery);
+    if (params.get('status') === 'ok') {
+      toast(`Connected ${params.get('platform') || ''}${params.get('count') ? ' (' + params.get('count') + ' accounts)' : ''}`, 'success');
+    } else if (params.get('status') === 'error') {
+      toast('Connection failed: ' + (params.get('reason') || 'unknown error'), 'error', 7000);
+    }
+    // Clean the hash so we don't re-toast on refresh
+    history.replaceState(null, '', '#settings');
+  }
+
+  async function loadConnections() {
+    connBody.innerHTML = '<div class="loading"></div>';
+    let creds = [];
+    try { creds = await api('/api/connect'); } catch (e) { toast(e.message, 'error'); }
+    if (stale(myGen)) return;
+    connBody.innerHTML = '';
+
+    // Group by platform for tidy display
+    const byPlatform = { facebook: [], instagram: [], linkedin: [] };
+    for (const c of creds) if (byPlatform[c.platform]) byPlatform[c.platform].push(c);
+
+    const platforms = [
+      { key: 'instagram', label: 'Instagram', icon: '📷', provider: 'meta',
+        desc: 'Post images and captions to your IG Business account. Requires an IG account linked to a Facebook page.' },
+      { key: 'facebook',  label: 'Facebook Page', icon: '👥', provider: 'meta',
+        desc: 'Publish to Facebook pages you admin.' },
+      { key: 'linkedin',  label: 'LinkedIn', icon: '💼', provider: 'linkedin',
+        desc: 'Post to your personal LinkedIn feed on your behalf.' },
+    ];
+
+    for (const p of platforms) {
+      const accts = byPlatform[p.key] || [];
+      const tile = el('div', { class: 'conn-tile' });
+
+      tile.appendChild(el('div', { class: 'conn-head' },
+        el('span', { class: 'conn-icon' }, p.icon),
+        el('div', { style: 'flex:1' },
+          el('div', { class: 'conn-title' }, p.label),
+          el('div', { class: 'conn-desc' }, p.desc),
+        ),
+        el('button', {
+          class: 'btn btn-primary btn-sm',
+          onclick: async () => {
+            try {
+              const r = await api(`/api/connect/${p.provider}/start`);
+              window.location.href = r.url;
+            } catch (err) { toast(err.message, 'error'); }
+          },
+        }, accts.length ? '+ Add another' : 'Connect'),
+      ));
+
+      if (accts.length) {
+        const list = el('div', { class: 'conn-accounts' });
+        for (const a of accts) {
+          list.appendChild(renderConnectedAccount(a, loadConnections));
+        }
+        tile.appendChild(list);
+      }
+      connBody.appendChild(tile);
+    }
+  }
+
+  loadConnections();
 };
+
+function renderConnectedAccount(a, refresh) {
+  const daysLeft = a.expires_at
+    ? Math.floor((new Date(a.expires_at).getTime() - Date.now()) / 86400000)
+    : null;
+  const statusClass = a.status === 'active'
+    ? (daysLeft !== null && daysLeft < 7 ? 'warn' : 'good')
+    : (a.status === 'expired' || a.status === 'needs_reauth' ? 'bad' : 'warn');
+
+  return el('div', { class: 'conn-account' },
+    a.account_avatar_url
+      ? el('img', { src: a.account_avatar_url, alt: '', class: 'conn-avatar' })
+      : el('div', { class: 'conn-avatar conn-avatar-fallback' },
+          (a.account_name || '?')[0].toUpperCase()),
+    el('div', { style: 'flex:1; min-width:0' },
+      el('div', { style: 'font-weight:500; font-size:13px' }, a.account_name || a.account_handle || '(unnamed)'),
+      el('div', { style: 'font-size:11px; color:var(--text-dim)' },
+        a.account_handle ? '@' + String(a.account_handle).replace(/^@/, '') : (a.account_id || ''),
+      ),
+    ),
+    el('div', { class: `conn-status conn-status-${statusClass}` },
+      a.status === 'active'
+        ? (daysLeft !== null ? `${daysLeft}d left` : 'Active')
+        : (a.status === 'needs_reauth' ? '⚠ Reconnect' : a.status),
+    ),
+    el('button', {
+      class: 'icon-btn', title: 'Disconnect',
+      onclick: async () => {
+        if (!confirm(`Disconnect "${a.account_name || a.platform}"?`)) return;
+        try { await api('/api/connect/' + a.id, { method: 'DELETE' }); toast('Disconnected', 'success'); refresh(); }
+        catch (e) { toast(e.message, 'error'); }
+      },
+    }, '✕'),
+  );
+}
 
 // ---- date helper --------------------------------------------------------
 function formatDate(s, { dateOnly = false } = {}) {
