@@ -388,21 +388,35 @@ textarea { resize: vertical; min-height: 80px; font-family: inherit; }
   display: flex; align-items: center; gap: 14px;
   margin-bottom: 4px;
 }
-/* Real logo image (sphere, gradient). Sizes scale by context. */
+/* Real logo image (sphere, gradient). Sizes scale by context.
+   On the dark theme the raw gradient reads a bit muted — we brighten
+   + saturate the pixels with a filter chain and wrap the sphere in a
+   soft violet halo so it pops. */
 .logo-mark {
-  width: 44px;
-  height: 44px;
+  width: 56px;
+  height: 56px;
   object-fit: contain;
   flex-shrink: 0;
-  /* subtle brand glow under the logo */
-  filter: drop-shadow(0 4px 16px rgba(99,102,241,0.35));
+  padding: 4px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  /* Soft radial halo behind the sphere */
+  background: radial-gradient(circle at center,
+    rgba(139, 92, 246, 0.35) 0%,
+    rgba(99, 102, 241, 0.15) 45%,
+    transparent 75%);
+  /* Brighten + punch up the purple, plus a glowy shadow */
+  filter:
+    drop-shadow(0 0 18px rgba(139, 92, 246, 0.55))
+    drop-shadow(0 6px 14px rgba(0, 0, 0, 0.35))
+    brightness(1.20) saturate(1.25);
 }
 /* Smaller in the sidebar + compact auth-card header */
 .sidebar-brand .logo-mark,
 .auth-card-brand .logo-mark {
-  width: 36px;
-  height: 36px;
-  filter: drop-shadow(0 2px 8px rgba(99,102,241,0.35));
+  width: 42px;
+  height: 42px;
+  padding: 3px;
 }
 .auth-title { font-size: 20px; font-weight: 700; color: var(--text); }
 .auth-subtitle { font-size: 13px; color: var(--text-dim); }
