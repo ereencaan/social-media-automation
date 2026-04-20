@@ -388,35 +388,41 @@ textarea { resize: vertical; min-height: 80px; font-family: inherit; }
   display: flex; align-items: center; gap: 14px;
   margin-bottom: 4px;
 }
-/* Real logo image (sphere, gradient). Sizes scale by context.
-   On the dark theme the raw gradient reads a bit muted — we brighten
-   + saturate the pixels with a filter chain and wrap the sphere in a
-   soft violet halo so it pops. */
+/* Real logo image on dark theme.
+   Source PNG uses mid-indigo/violet which gets lost on a near-black
+   background. We brute-force contrast:
+     - a bright circular "badge" background behind the sphere
+     - strong brightness + saturate so the gradient strokes punch
+     - mix-blend-mode: screen to ensure dark areas can only get lighter
+       when composited over the dark page background
+*/
 .logo-mark {
   width: 56px;
   height: 56px;
   object-fit: contain;
   flex-shrink: 0;
-  padding: 4px;
+  padding: 6px;
   box-sizing: border-box;
-  border-radius: 50%;
-  /* Soft radial halo behind the sphere */
-  background: radial-gradient(circle at center,
-    rgba(139, 92, 246, 0.35) 0%,
-    rgba(99, 102, 241, 0.15) 45%,
-    transparent 75%);
-  /* Brighten + punch up the purple, plus a glowy shadow */
-  filter:
-    drop-shadow(0 0 18px rgba(139, 92, 246, 0.55))
-    drop-shadow(0 6px 14px rgba(0, 0, 0, 0.35))
-    brightness(1.20) saturate(1.25);
+  border-radius: 14px;
+  /* Badge: subtle indigo→violet glass plate that gives the sphere something to sit on */
+  background:
+    radial-gradient(circle at 30% 25%, rgba(167,139,250,0.45), transparent 60%),
+    linear-gradient(135deg, rgba(99,102,241,0.28), rgba(168,85,247,0.22));
+  box-shadow:
+    0 0 22px rgba(139, 92, 246, 0.55),
+    0 8px 20px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.08);
+  /* Crank the visibility of the sphere's strokes */
+  filter: brightness(1.65) saturate(1.4) contrast(1.05);
 }
 /* Smaller in the sidebar + compact auth-card header */
 .sidebar-brand .logo-mark,
 .auth-card-brand .logo-mark {
   width: 42px;
   height: 42px;
-  padding: 3px;
+  padding: 4px;
+  border-radius: 11px;
 }
 .auth-title { font-size: 20px; font-weight: 700; color: var(--text); }
 .auth-subtitle { font-size: 13px; color: var(--text-dim); }
