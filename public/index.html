@@ -12,63 +12,134 @@
 <body>
   <!-- ===================== AUTH SCREEN ===================== -->
   <div id="auth-screen" class="auth-screen hidden">
-    <div class="auth-card">
-      <div class="auth-brand">
-        <div class="logo-mark">H</div>
-        <div>
-          <div class="auth-title">Hitra</div>
-          <div class="auth-subtitle">Social & CRM Automation</div>
+    <!-- Animated background -->
+    <div class="auth-bg" aria-hidden="true">
+      <div class="orb orb-1"></div>
+      <div class="orb orb-2"></div>
+      <div class="orb orb-3"></div>
+      <div class="auth-grid"></div>
+    </div>
+
+    <div class="auth-container">
+      <!-- LEFT: marketing panel -->
+      <section class="auth-pitch">
+        <div class="auth-brand">
+          <div class="logo-mark">H</div>
+          <div>
+            <div class="auth-title">Hitrapost</div>
+            <div class="auth-subtitle">Social & CRM Automation</div>
+          </div>
         </div>
-      </div>
 
-      <div class="auth-tabs">
-        <button class="tab active" data-tab="login">Log in</button>
-        <button class="tab" data-tab="register">Sign up</button>
-      </div>
+        <h1 class="auth-hero">
+          Your AI social media team —
+          <span class="grad-text">always on brand.</span>
+        </h1>
 
-      <!-- Login form -->
-      <form id="login-form" class="auth-form">
-        <label>Email
-          <input type="email" name="email" required placeholder="you@company.com" />
-        </label>
-        <label>Password
-          <div class="pw-wrap">
-            <input type="password" name="password" required minlength="8" placeholder="••••••••" />
-            <button type="button" class="pw-toggle" aria-label="Show password" data-target="prev">
-              <span class="eye-on">👁</span><span class="eye-off hidden">🙈</span>
-            </button>
+        <p class="auth-lead">
+          One platform that plans, drafts, reviews, and publishes — tailored
+          to your business profile. Three AI models grade every post before
+          it ever goes live.
+        </p>
+
+        <ul class="auth-features">
+          <li>
+            <span class="feat-icon">◈</span>
+            <div>
+              <strong>Multi-model content review</strong>
+              <span>Claude, Gemini, and GPT-4 grade every post on 5 axes so your feed never goes generic.</span>
+            </div>
+          </li>
+          <li>
+            <span class="feat-icon">◉</span>
+            <div>
+              <strong>Calendar-driven automation</strong>
+              <span>Monthly plans built around your industry's days + your company's milestones — generated 48h ahead, auto-published with your approval.</span>
+            </div>
+          </li>
+          <li>
+            <span class="feat-icon">◎</span>
+            <div>
+              <strong>Lead CRM with AI-drafted follow-ups</strong>
+              <span>Email drafts grounded in the lead's context and your brand voice. Reviewed before they hit send.</span>
+            </div>
+          </li>
+          <li>
+            <span class="feat-icon">◇</span>
+            <div>
+              <strong>Connect your accounts in one click</strong>
+              <span>Instagram, Facebook, LinkedIn — OAuth handled, tokens refreshed for you.</span>
+            </div>
+          </li>
+        </ul>
+
+        <div class="auth-trust">
+          <span class="trust-dot"></span>
+          Built on Claude · GPT-4 · Gemini · Flux
+        </div>
+      </section>
+
+      <!-- RIGHT: auth form -->
+      <section class="auth-card-wrap">
+        <div class="auth-card">
+          <div class="auth-card-brand">
+            <div class="logo-mark">H</div>
+            <div class="auth-card-brand-text">
+              <div class="auth-title-sm">Hitrapost</div>
+              <div class="auth-subtitle-sm">Social & CRM Automation</div>
+            </div>
           </div>
-        </label>
-        <button type="submit" class="btn btn-primary btn-block">Log in</button>
-        <div class="auth-error" id="login-error"></div>
-      </form>
 
-      <!-- Register form -->
-      <form id="register-form" class="auth-form hidden">
-        <label>Workspace name
-          <input type="text" name="orgName" required placeholder="Acme Inc." />
-        </label>
-        <label>Your name
-          <input type="text" name="name" placeholder="Jane Doe" />
-        </label>
-        <label>Email
-          <input type="email" name="email" required placeholder="you@company.com" />
-        </label>
-        <label>Password
-          <div class="pw-wrap">
-            <input type="password" name="password" required minlength="8" placeholder="At least 8 characters" />
-            <button type="button" class="pw-toggle" aria-label="Show password" data-target="prev">
-              <span class="eye-on">👁</span><span class="eye-off hidden">🙈</span>
-            </button>
+          <div class="auth-tabs">
+            <button class="tab active" data-tab="login">Log in</button>
+            <button class="tab" data-tab="register">Sign up</button>
           </div>
-        </label>
-        <button type="submit" class="btn btn-primary btn-block">Create account</button>
-        <div class="auth-error" id="register-error"></div>
-      </form>
 
-      <div class="auth-footer">
-        Secure multi-tenant workspace · Your data is isolated by organization.
-      </div>
+          <!-- Login form -->
+          <form id="login-form" class="auth-form">
+            <label>Email
+              <input type="email" name="email" required placeholder="you@company.com" autocomplete="email" />
+            </label>
+            <label>Password
+              <div class="pw-wrap">
+                <input type="password" name="password" required minlength="8" placeholder="••••••••" autocomplete="current-password" />
+                <button type="button" class="pw-toggle" aria-label="Show password" data-target="prev">
+                  <span class="eye-on">👁</span><span class="eye-off hidden">🙈</span>
+                </button>
+              </div>
+            </label>
+            <button type="submit" class="btn btn-primary btn-block">Log in</button>
+            <div class="auth-error" id="login-error"></div>
+          </form>
+
+          <!-- Register form -->
+          <form id="register-form" class="auth-form hidden">
+            <label>Workspace name
+              <input type="text" name="orgName" required placeholder="Acme Inc." autocomplete="organization" />
+            </label>
+            <label>Your name
+              <input type="text" name="name" placeholder="Jane Doe" autocomplete="name" />
+            </label>
+            <label>Email
+              <input type="email" name="email" required placeholder="you@company.com" autocomplete="email" />
+            </label>
+            <label>Password
+              <div class="pw-wrap">
+                <input type="password" name="password" required minlength="8" placeholder="At least 8 characters" autocomplete="new-password" />
+                <button type="button" class="pw-toggle" aria-label="Show password" data-target="prev">
+                  <span class="eye-on">👁</span><span class="eye-off hidden">🙈</span>
+                </button>
+              </div>
+            </label>
+            <button type="submit" class="btn btn-primary btn-block">Create account</button>
+            <div class="auth-error" id="register-error"></div>
+          </form>
+
+          <div class="auth-footer">
+            Secure multi-tenant workspace · Your data is isolated by organization.
+          </div>
+        </div>
+      </section>
     </div>
   </div>
 
