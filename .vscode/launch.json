@@ -1,0 +1,43 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Launch SaaS (server)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/app.js",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "SESSION_SECRET": "dev-secret",
+        "NODE_ENV": "development"
+      },
+      "console": "internalConsole",
+      "internalConsoleOptions": "openOnSessionStart",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+      "outputCapture": "std",
+      "restart": true
+    },
+    {
+      "name": "Launch SaaS (break on start)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/app.js",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "SESSION_SECRET": "dev-secret",
+        "NODE_ENV": "development"
+      },
+      "stopOnEntry": true,
+      "console": "internalConsole",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "Attach to running server",
+      "type": "node",
+      "request": "attach",
+      "port": 9229,
+      "cwd": "${workspaceFolder}",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    }
+  ]
+}
