@@ -321,8 +321,8 @@ textarea { resize: vertical; min-height: 80px; font-family: inherit; }
 }
 .auth-card {
   width: 100%;
-  max-width: 420px;
-  padding: 36px 34px;
+  max-width: 480px;
+  padding: 48px 44px;
   background: rgba(22, 26, 35, 0.72);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
@@ -333,6 +333,29 @@ textarea { resize: vertical; min-height: 80px; font-family: inherit; }
     inset 0 1px 0 rgba(255,255,255,0.05);
   animation: card-in 0.5s cubic-bezier(0.2, 0.7, 0.25, 1) both;
 }
+/* Beefier inputs + buttons inside the auth card */
+.auth-card .auth-tabs { padding: 5px; margin-bottom: 28px; }
+.auth-card .auth-tabs .tab {
+  padding: 11px 12px;
+  font-size: 14px;
+}
+.auth-card label { margin-bottom: 18px; font-size: 13px; }
+.auth-card input[type="text"],
+.auth-card input[type="email"],
+.auth-card input[type="password"] {
+  padding: 13px 14px;
+  font-size: 15px;
+  border-radius: 10px;
+}
+.auth-card .pw-wrap > input { padding-right: 46px; }
+.auth-card .btn-primary.btn-block {
+  padding: 14px;
+  font-size: 15px;
+  font-weight: 600;
+  margin-top: 6px;
+  border-radius: 10px;
+}
+.auth-card .auth-footer { margin-top: 28px; }
 @keyframes card-in {
   from { transform: translateY(16px); opacity: 0; }
   to   { transform: translateY(0);    opacity: 1; }
@@ -1352,14 +1375,51 @@ tr.clickable:hover { background: var(--surface-2); }
    ============================================================ */
 /* Auth screen responsive — collapse to single column on small screens */
 @media (max-width: 960px) {
+  .auth-screen {
+    padding: 28px 18px 40px;
+    align-items: flex-start;
+  }
   .auth-container {
     grid-template-columns: 1fr;
-    max-width: 440px;
+    max-width: 460px;
     gap: 24px;
+    margin-top: 12px;
   }
-  .auth-pitch { display: none; }
+  /* Card first (login is the reason they're here), pitch below for marketing */
+  .auth-card-wrap { order: 1; }
+  .auth-pitch     { order: 2; }
+
+  /* Compact pitch on mobile */
+  .auth-pitch {
+    text-align: center;
+    align-items: center;
+    gap: 18px;
+  }
+  .auth-pitch .auth-brand { display: none; } /* brand already inside the card on mobile */
+  .auth-hero { font-size: 26px; line-height: 1.25; }
+  .grad-text { white-space: normal; }
+  .auth-lead { font-size: 13.5px; max-width: 100%; }
+  .auth-features { gap: 12px; }
+  .auth-features li { align-items: flex-start; }
+  .auth-features strong { font-size: 13px; }
+  .auth-features span   { font-size: 12px; }
+  .auth-trust { margin: 0 auto; }
+
+  /* Card: compact padding, full brand header inside */
+  .auth-card { padding: 32px 26px; max-width: 100%; }
   .auth-card-brand { display: flex; }
   .auth-card > .auth-brand { display: none; }
+}
+
+@media (max-width: 480px) {
+  .auth-screen { padding: 20px 14px 32px; }
+  .auth-card { padding: 28px 22px; border-radius: 16px; }
+  .auth-card .auth-tabs .tab { font-size: 13px; padding: 10px 8px; }
+  .auth-card input[type="text"],
+  .auth-card input[type="email"],
+  .auth-card input[type="password"] { padding: 12px 13px; font-size: 14px; }
+  .auth-hero { font-size: 22px; }
+  .auth-features strong { font-size: 12.5px; }
 }
 
 @media (max-width: 860px) {
