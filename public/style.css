@@ -388,31 +388,73 @@ textarea { resize: vertical; min-height: 80px; font-family: inherit; }
   display: flex; align-items: center; gap: 14px;
   margin-bottom: 4px;
 }
-/* Classic app-icon treatment on dark theme: sphere sits on a clean
-   white plate so its purple strokes (which are on the darker side in
-   the source PNG) have proper contrast. */
+/* ─── Premium glass-morphism + embossed app-icon badge ───
+   Multi-layer background for 3D feel, inset highlights for emboss,
+   outer violet halo that pulses gently. Size is bumped up. */
 .logo-mark {
-  width: 56px;
-  height: 56px;
+  width: 72px;
+  height: 72px;
   object-fit: contain;
   flex-shrink: 0;
-  padding: 8px;
+  padding: 10px;
   box-sizing: border-box;
-  border-radius: 14px;
-  background: #ffffff;
+  border-radius: 20px;
+  position: relative;
+  background:
+    /* top-left specular shine */
+    radial-gradient(ellipse at 28% 18%, rgba(255,255,255,0.55) 0%, transparent 45%),
+    /* warm violet wash in bottom-right */
+    radial-gradient(ellipse at 75% 80%, rgba(168,85,247,0.30) 0%, transparent 55%),
+    /* base plate: pale iridescent indigo → pearl */
+    linear-gradient(155deg, #f5f3ff 0%, #e0e7ff 45%, #fce7f3 100%);
   box-shadow:
-    0 0 22px rgba(139, 92, 246, 0.45),
-    0 8px 18px rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(255,255,255,0.1);
-  /* No filter — the sphere on white needs no brightness hack */
+    /* pulsating outer violet halo */
+    0 0 42px rgba(139, 92, 246, 0.50),
+    /* depth shadow */
+    0 14px 32px rgba(10, 10, 30, 0.55),
+    0 4px 10px rgba(0, 0, 0, 0.30),
+    /* top emboss: crisp bright highlight */
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    /* soft top glow continuing the highlight */
+    inset 0 3px 6px rgba(255, 255, 255, 0.55),
+    /* bottom inset shadow for 3D depth */
+    inset 0 -3px 6px rgba(99, 102, 241, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  animation: logo-shimmer 5s ease-in-out infinite;
+  transition: transform 0.3s ease;
 }
-/* Smaller in the sidebar + compact auth-card header */
+.logo-mark:hover {
+  transform: translateY(-1px) scale(1.04);
+}
+@keyframes logo-shimmer {
+  0%, 100% {
+    box-shadow:
+      0 0 42px rgba(139, 92, 246, 0.50),
+      0 14px 32px rgba(10, 10, 30, 0.55),
+      0 4px 10px rgba(0, 0, 0, 0.30),
+      inset 0 1px 0 rgba(255, 255, 255, 0.95),
+      inset 0 3px 6px rgba(255, 255, 255, 0.55),
+      inset 0 -3px 6px rgba(99, 102, 241, 0.18);
+  }
+  50% {
+    box-shadow:
+      0 0 58px rgba(168, 85, 247, 0.65),
+      0 14px 32px rgba(10, 10, 30, 0.55),
+      0 4px 10px rgba(0, 0, 0, 0.30),
+      inset 0 1px 0 rgba(255, 255, 255, 0.95),
+      inset 0 3px 6px rgba(255, 255, 255, 0.55),
+      inset 0 -3px 6px rgba(168, 85, 247, 0.25);
+  }
+}
+/* Smaller in the sidebar + compact auth-card header — keep the same
+   premium treatment, just scaled down. */
 .sidebar-brand .logo-mark,
 .auth-card-brand .logo-mark {
-  width: 42px;
-  height: 42px;
+  width: 48px;
+  height: 48px;
   padding: 6px;
-  border-radius: 11px;
+  border-radius: 14px;
+  animation: none; /* no pulse when there are many UI elements */
 }
 .auth-title { font-size: 20px; font-weight: 700; color: var(--text); }
 .auth-subtitle { font-size: 13px; color: var(--text-dim); }
