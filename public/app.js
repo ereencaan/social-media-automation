@@ -253,9 +253,14 @@ VIEWS.dashboard = async function dashboardView(root, myGen) {
   if (stale(myGen)) return;
 
   const count = (status) => leads.filter(l => l.status === status).length;
+  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const newThisWeek = leads.filter(l => {
+    const t = l.created_at ? new Date(l.created_at.replace(' ', 'T') + 'Z').getTime() : 0;
+    return t >= weekAgo;
+  }).length;
   const stats = [
     { title: 'Total leads', value: leads.length, hint: 'All pipeline stages' },
-    { title: 'New', value: count('new'), hint: 'Awaiting first contact' },
+    { title: 'New this week', value: newThisWeek, hint: 'Last 7 days, all sources' },
     { title: 'Qualified', value: count('qualified'), hint: 'Ready to convert' },
     { title: 'Won', value: count('won'), hint: 'Closed deals' },
     { title: 'Posts', value: posts.length, hint: 'Content in workspace' },
@@ -289,7 +294,7 @@ VIEWS.dashboard = async function dashboardView(root, myGen) {
       el('td', {}, l.name || '—'),
       el('td', {}, l.email || l.phone || '—'),
       el('td', {}, renderBadge(l.status)),
-      el('td', {}, l.source || 'manual'),
+      el('td', {}, renderSourceBadge(l.source)),
       el('td', {}, formatDate(l.created_at)),
     ));
     section.appendChild(el('div', { class: 'table-wrap' },
@@ -322,13 +327,52 @@ VIEWS.leads = async function leadsView(root, myGen) {
 
   root.innerHTML = '';
   if (!leads.length) {
-    root.appendChild(el('div', { class: 'card' },
-      el('div', { class: 'empty-state' },
-        el('h3', {}, 'Your CRM is empty'),
-        el('p', {}, 'Add leads manually or connect a channel (Instagram DM, LinkedIn, webhook intake).'),
-        el('button', { class: 'btn btn-primary', onclick: () => openNewLeadModal() }, 'Add first lead'),
-      ),
+    // Fetch the live intake URL so the user can copy-paste it straight
+    // from the empty state.
+    let intakeUrl = '';
+    try { const r = await api('/api/leads/intake/token'); intakeUrl = r.url || ''; } catch {}
+    if (stale(myGen)) return;
+
+    const card = el('div', { class: 'card' });
+    card.appendChild(el('div', { class: 'empty-state' },
+      el('h3', {}, 'Your CRM is empty'),
+      el('p', {}, 'Leads can land here automatically from Instagram DMs, Facebook Page messages, or any tool that POSTs to your webhook.'),
     ));
+
+    const channels = el('div', { class: 'intake-channels' },
+      el('div', { class: 'intake-channel' },
+        el('div', { class: 'intake-channel-head' },
+          el('span', { class: 'intake-channel-icon' }, '📷'),
+          el('strong', {}, 'Instagram & Facebook'),
+        ),
+        el('p', {}, 'Connect your IG Business account and Page — every new DM becomes a lead automatically.'),
+        el('button', { class: 'btn btn-sm', onclick: () => navigate('settings') }, 'Connect accounts'),
+      ),
+      el('div', { class: 'intake-channel' },
+        el('div', { class: 'intake-channel-head' },
+          el('span', { class: 'intake-channel-icon' }, '🔗'),
+          el('strong', {}, 'Webhook / Zapier / Forms'),
+        ),
+        el('p', {}, 'POST JSON to your intake URL from Typeform, Zapier, or any HTML form.'),
+        intakeUrl ? el('div', { class: 'intake-url-field intake-url-field-sm' },
+          el('code', { class: 'intake-url' }, intakeUrl),
+          el('button', {
+            class: 'btn btn-sm',
+            onclick: () => navigator.clipboard.writeText(intakeUrl).then(() => toast('Copied', 'success')),
+          }, 'Copy'),
+        ) : null,
+      ),
+      el('div', { class: 'intake-channel' },
+        el('div', { class: 'intake-channel-head' },
+          el('span', { class: 'intake-channel-icon' }, '✍'),
+          el('strong', {}, 'Manual entry'),
+        ),
+        el('p', {}, 'Quickly add a lead from a phone call, event, or referral.'),
+        el('button', { class: 'btn btn-primary btn-sm', onclick: () => openNewLeadModal() }, '+ Add lead'),
+      ),
+    );
+    card.appendChild(channels);
+    root.appendChild(card);
     return;
   }
 
@@ -357,9 +401,26 @@ function renderLeadCard(lead) {
       lead.phone ? el('span', {}, '☎ ' + lead.phone) : null,
     ),
     el('div', { class: 'lead-card-footer' },
-      el('span', {}, lead.source || 'manual'),
+      renderSourceBadge(lead.source),
       el('span', {}, formatDate(lead.created_at, { dateOnly: true })),
     ),
+  );
+}
+
+// Source badge: icon + short label + colored chip so the origin channel
+// is scannable at a glance in the kanban.
+const SOURCE_META = {
+  instagram_dm:     { icon: '📷', label: 'Instagram', cls: 'src-instagram' },
+  facebook_message: { icon: '👥', label: 'Facebook',  cls: 'src-facebook'  },
+  linkedin:         { icon: '💼', label: 'LinkedIn',  cls: 'src-linkedin'  },
+  webhook:          { icon: '🔗', label: 'Webhook',   cls: 'src-webhook'   },
+  manual:           { icon: '✍',  label: 'Manual',    cls: 'src-manual'    },
+};
+function renderSourceBadge(source) {
+  const meta = SOURCE_META[source] || SOURCE_META.manual;
+  return el('span', { class: `source-chip ${meta.cls}`, title: source || 'manual' },
+    el('span', { class: 'source-chip-icon' }, meta.icon),
+    meta.label,
   );
 }
 
@@ -2348,6 +2409,74 @@ VIEWS.settings = async function settingsView(root, myGen) {
     } }, 'Log out'),
   ));
   root.appendChild(card);
+
+  // ---- Intake webhook card ----
+  const intakeCard = el('div', { class: 'card', style: 'margin-top:20px' });
+  intakeCard.appendChild(el('div', { class: 'section-header' },
+    el('h2', {}, 'Intake webhook'),
+    el('div', { class: 'section-sub' },
+      'POST leads from Typeform, Zapier, website forms, or any tool. Every submission becomes a new lead in your CRM.'),
+  ));
+  const intakeBody = el('div');
+  intakeCard.appendChild(intakeBody);
+  root.appendChild(intakeCard);
+
+  async function loadIntake() {
+    intakeBody.innerHTML = '<div class="loading"></div>';
+    let info;
+    try { info = await api('/api/leads/intake/token'); }
+    catch (e) { intakeBody.innerHTML = `<div class="auth-error show">${e.message}</div>`; return; }
+    if (stale(myGen)) return;
+
+    const curlEx = `curl -X POST ${info.url} \\\n  -H "Content-Type: application/json" \\\n  -d '{"name":"Jane Doe","email":"jane@example.com","message":"Interested in a demo"}'`;
+
+    intakeBody.innerHTML = '';
+    intakeBody.appendChild(el('div', { class: 'intake-url-row' },
+      el('label', { style: 'font-size:12px; color:var(--text-dim); font-weight:500' }, 'Your intake URL'),
+      el('div', { class: 'intake-url-field' },
+        el('code', { class: 'intake-url' }, info.url),
+        el('button', {
+          class: 'btn btn-sm', title: 'Copy',
+          onclick: () => {
+            navigator.clipboard.writeText(info.url).then(() => toast('Copied', 'success'));
+          },
+        }, 'Copy'),
+      ),
+    ));
+
+    intakeBody.appendChild(el('details', { class: 'intake-details', style: 'margin-top:14px' },
+      el('summary', {}, 'cURL example'),
+      el('pre', { class: 'intake-curl' }, curlEx),
+    ));
+
+    intakeBody.appendChild(el('details', { class: 'intake-details', style: 'margin-top:8px' },
+      el('summary', {}, 'Accepted field names'),
+      el('div', { style: 'font-size:13px; color:var(--text-dim); padding:8px 4px; line-height:1.7' },
+        el('div', {}, '• name, full_name, fullName, contact'),
+        el('div', {}, '• email, emailAddress'),
+        el('div', {}, '• phone, tel, mobile, phone_number'),
+        el('div', {}, '• message, comment, body, note'),
+        el('div', {}, '• source, channel (defaults to "webhook")'),
+        el('div', { style: 'margin-top:6px; color:var(--text-mute); font-size:12px' },
+          'Any other fields are preserved on the lead\'s activity log.'),
+      ),
+    ));
+
+    intakeBody.appendChild(el('div', { class: 'form-actions', style: 'margin-top:16px' },
+      el('button', {
+        class: 'btn btn-danger btn-sm',
+        onclick: async () => {
+          if (!confirm('Rotate your intake token? The old URL will stop working immediately.')) return;
+          try {
+            await api('/api/leads/intake/token/rotate', { method: 'POST' });
+            toast('Token rotated', 'success');
+            loadIntake();
+          } catch (e) { toast(e.message, 'error'); }
+        },
+      }, 'Rotate token'),
+    ));
+  }
+  loadIntake();
 
   // ---- Connections card ----
   const connCard = el('div', { class: 'card', style: 'margin-top:20px' });

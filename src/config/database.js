@@ -55,6 +55,18 @@ async function init() {
     )
   `);
 
+  // Idempotent migration: per-org intake_token for the public webhook.
+  // This is the shared secret for POST /api/intake/:token — anyone with
+  // the URL can file a lead into that workspace, so we rotate it on
+  // demand from Settings.
+  const existingOrgCols = new Set(
+    db.exec("PRAGMA table_info(orgs)")[0]?.values.map(r => r[1]) || []
+  );
+  if (!existingOrgCols.has('intake_token')) {
+    db.run(`ALTER TABLE orgs ADD COLUMN intake_token TEXT`);
+    db.run(`CREATE UNIQUE INDEX IF NOT EXISTS uq_orgs_intake_token ON orgs(intake_token) WHERE intake_token IS NOT NULL`);
+  }
+
   db.run(`
     CREATE TABLE IF NOT EXISTS users (
       id            TEXT PRIMARY KEY,
@@ -67,6 +79,24 @@ async function init() {
     )
   `);
   db.run(`CREATE INDEX IF NOT EXISTS idx_users_org ON users(org_id)`);
+
+  // Idempotent migration: 2FA + security columns on older DBs.
+  const existingUserCols = new Set(
+    db.exec("PRAGMA table_info(users)")[0]?.values.map(r => r[1]) || []
+  );
+  const wantedUserCols = [
+    ['totp_secret',          'TEXT'],
+    ['totp_enabled',         'INTEGER NOT NULL DEFAULT 0'],
+    ['totp_backup_codes',    'TEXT'],           // JSON array of bcrypt-hashed backup codes
+    ['last_login_at',        'TEXT'],
+    ['failed_login_count',   'INTEGER NOT NULL DEFAULT 0'],
+    ['locked_until',         'TEXT'],           // ISO datetime while account is temp-locked
+  ];
+  for (const [name, type] of wantedUserCols) {
+    if (!existingUserCols.has(name)) {
+      db.run(`ALTER TABLE users ADD COLUMN ${name} ${type}`);
+    }
+  }
 
   // ---- brand settings (one row per org) ---------------------------------
   db.run(`
@@ -308,7 +338,8 @@ async function init() {
 async function getDb() {
   if (db) return db;
   if (!initPromise) initPromise = init();
-  return initPromise;
+  db = await initPromise;
+  return db;
 }
 
 // ---- synchronous statement wrapper (better-sqlite3-compatible API) ------

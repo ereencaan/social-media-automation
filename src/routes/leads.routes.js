@@ -1,11 +1,38 @@
 const express = require('express');
 const router = express.Router();
 const svc = require('../services/leads.service');
+const intake = require('../services/intake.service');
 const { prepare } = require('../config/database');
 const { draftAndReview, draftEmail } = require('../services/lead-email.service');
 
 // All routes here assume requireAuth has already attached req.user.
 // Org scoping is derived from req.user.orgId — never from the request body.
+
+// Intake token management (authenticated — so the user can reveal / rotate
+// the token for their own workspace). The public ingest endpoint lives
+// at POST /api/intake/:token under its own router.
+router.get('/intake/token', (req, res) => {
+  try {
+    const token = intake.getOrCreateToken(req.user.orgId);
+    res.json({ token, url: buildIntakeUrl(req, token) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/intake/token/rotate', (req, res) => {
+  try {
+    const token = intake.regenerateToken(req.user.orgId);
+    res.json({ token, url: buildIntakeUrl(req, token) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+function buildIntakeUrl(req, token) {
+  const base = process.env.APP_BASE_URL || `${req.protocol}://${req.get('host')}`;
+  return `${base.replace(/\/$/, '')}/api/intake/${token}`;
+}
 
 router.get('/', (req, res) => {
   try {

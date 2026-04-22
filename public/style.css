@@ -392,32 +392,24 @@ textarea { resize: vertical; min-height: 80px; font-family: inherit; }
    Multi-layer background for 3D feel, inset highlights for emboss,
    outer violet halo that pulses gently. Size is bumped up. */
 .logo-mark {
-  width: 72px;
-  height: 72px;
+  width: 96px;
+  height: 96px;
   object-fit: contain;
   flex-shrink: 0;
-  padding: 10px;
+  padding: 12px;
   box-sizing: border-box;
-  border-radius: 20px;
+  border-radius: 22px;
   position: relative;
   background:
-    /* top-left specular shine */
     radial-gradient(ellipse at 28% 18%, rgba(255,255,255,0.55) 0%, transparent 45%),
-    /* warm violet wash in bottom-right */
     radial-gradient(ellipse at 75% 80%, rgba(168,85,247,0.30) 0%, transparent 55%),
-    /* base plate: pale iridescent indigo → pearl */
     linear-gradient(155deg, #f5f3ff 0%, #e0e7ff 45%, #fce7f3 100%);
   box-shadow:
-    /* pulsating outer violet halo */
     0 0 42px rgba(139, 92, 246, 0.50),
-    /* depth shadow */
     0 14px 32px rgba(10, 10, 30, 0.55),
     0 4px 10px rgba(0, 0, 0, 0.30),
-    /* top emboss: crisp bright highlight */
     inset 0 1px 0 rgba(255, 255, 255, 0.95),
-    /* soft top glow continuing the highlight */
     inset 0 3px 6px rgba(255, 255, 255, 0.55),
-    /* bottom inset shadow for 3D depth */
     inset 0 -3px 6px rgba(99, 102, 241, 0.18);
   border: 1px solid rgba(255, 255, 255, 0.45);
   animation: logo-shimmer 5s ease-in-out infinite;
@@ -446,15 +438,46 @@ textarea { resize: vertical; min-height: 80px; font-family: inherit; }
       inset 0 -3px 6px rgba(168, 85, 247, 0.25);
   }
 }
-/* Smaller in the sidebar + compact auth-card header — keep the same
-   premium treatment, just scaled down. */
+/* Smaller in the sidebar + compact auth-card header.
+   Switch to a DARK indigo plate so the violet icon pops — on the main
+   pearl badge the icon was disappearing into its own gradient. */
 .sidebar-brand .logo-mark,
 .auth-card-brand .logo-mark {
-  width: 48px;
-  height: 48px;
-  padding: 6px;
-  border-radius: 14px;
-  animation: none; /* no pulse when there are many UI elements */
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border-radius: 0;
+  animation: none;
+  background: none;
+  border: none;
+  box-shadow: none;
+  filter: none;
+}
+/* Brighten the sidebar area behind the brand so the violet icon has
+   enough backdrop contrast to read without a plate. */
+.sidebar-brand {
+  background: radial-gradient(
+    ellipse at 30px 28px,
+    rgba(255, 255, 255, 0.14) 0%,
+    rgba(139, 92, 246, 0.08) 40%,
+    transparent 70%
+  );
+  border-radius: 0;
+}
+
+/* Full horizontal wordmark — used on the login/marketing panel. */
+.auth-brand-full {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 28px;
+}
+.logo-full {
+  max-width: 280px;
+  width: 100%;
+  height: auto;
+  display: block;
 }
 .auth-title { font-size: 20px; font-weight: 700; color: var(--text); }
 .auth-subtitle { font-size: 13px; color: var(--text-dim); }
@@ -801,6 +824,82 @@ tr.clickable:hover { background: var(--surface-2); }
 .kv-list { display: grid; grid-template-columns: 120px 1fr; gap: 6px 12px; font-size: 13px; }
 .kv-list dt { color: var(--text-dim); }
 .kv-list dd { color: var(--text); word-break: break-word; }
+
+/* ---- Intake webhook UI (Settings) -------------------------------------- */
+.intake-url-row { display: flex; flex-direction: column; gap: 6px; }
+.intake-url-field {
+  display: flex; align-items: stretch; gap: 8px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: 6px 6px 6px 12px;
+}
+.intake-url {
+  flex: 1; min-width: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  color: var(--text);
+  overflow-x: auto; white-space: nowrap;
+  padding: 8px 0;
+  background: transparent;
+}
+.intake-details { font-size: 13px; }
+.intake-details summary {
+  cursor: pointer; color: var(--text-dim); font-weight: 500; padding: 6px 0;
+  user-select: none;
+}
+.intake-details summary:hover { color: var(--text); }
+.intake-curl {
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  font-size: 12.5px; line-height: 1.6;
+  color: var(--text);
+  overflow-x: auto;
+  white-space: pre;
+}
+.intake-url-field-sm { padding: 4px 4px 4px 10px; margin-top: 8px; }
+.intake-url-field-sm .intake-url { font-size: 11.5px; padding: 6px 0; }
+
+/* ---- Leads empty-state channels ---------------------------------------- */
+.intake-channels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+  margin-top: 20px;
+}
+.intake-channel {
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  padding: 16px 18px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.intake-channel-head {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 14px;
+}
+.intake-channel-icon { font-size: 18px; }
+.intake-channel p {
+  font-size: 13px; color: var(--text-dim); line-height: 1.5; margin: 0;
+}
+
+/* ---- Lead source chip -------------------------------------------------- */
+.source-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px; font-weight: 500;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.source-chip-icon { font-size: 11px; }
+.source-chip.src-instagram { background: rgba(225, 48, 108, 0.14); color: #f472b6; border-color: rgba(225, 48, 108, 0.35); }
+.source-chip.src-facebook  { background: rgba(59, 89, 152, 0.18); color: #93c5fd; border-color: rgba(59, 89, 152, 0.45); }
+.source-chip.src-linkedin  { background: rgba(10, 102, 194, 0.18); color: #7dd3fc; border-color: rgba(10, 102, 194, 0.45); }
+.source-chip.src-webhook   { background: rgba(139, 92, 246, 0.16); color: #c4b5fd; border-color: rgba(139, 92, 246, 0.40); }
+.source-chip.src-manual    { background: var(--surface-2); color: var(--text-dim); border-color: var(--border-soft); }
 
 .activity-list { display: flex; flex-direction: column; gap: 10px; }
 .activity-item {

@@ -8,6 +8,10 @@ const { requireAuth } = require('./middleware/auth');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Behind Cloudflare → nginx → Node. Trust exactly one proxy hop so
+// req.ip reflects the real client IP and rate-limit keying is correct.
+app.set('trust proxy', 1);
+
 // Middleware
 app.use(express.json());
 if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
@@ -28,6 +32,11 @@ app.use(express.static(path.join(__dirname, '../public')));
 
 // Public routes
 app.use('/api/auth', require('./routes/auth.routes'));
+// Public webhook intake: token-in-URL is the auth factor here. See
+// routes/intake.routes.js for rate limits + payload normalization.
+app.use('/api/intake', require('./routes/intake.routes'));
+// Meta (Instagram + Facebook) webhooks — signature-verified, public.
+app.use('/webhooks', require('./routes/webhooks.routes'));
 
 // Protected routes
 // /storage contains user-uploaded media which may contain PII. Gate it on auth.
