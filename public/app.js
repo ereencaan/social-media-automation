@@ -1519,16 +1519,102 @@ VIEWS.calendar = async function calendarView(root, myGen) {
   }, '+ New monthly plan'));
 
   root.innerHTML = '<div class="loading"></div>';
-  let plans = [];
-  try { plans = await api('/api/plans'); } catch (e) { toast(e.message, 'error'); }
+  let plans = [], brand = {}, brandDates = [];
+  try {
+    [plans, brand, brandDates] = await Promise.all([
+      api('/api/plans'),
+      api('/api/brand').catch(() => ({})),
+      api('/api/brand/dates').catch(() => []),
+    ]);
+  } catch (e) { toast(e.message, 'error'); }
   if (stale(myGen)) return;
 
   root.innerHTML = '';
+
+  // ---- Upcoming dates panel (always shown) ----
+  // Pull this month's + next month's public holidays for the brand's
+  // country and merge with brand_special_dates so the user sees the
+  // calendar context even before generating a plan.
+  const upcomingCard = el('div', { class: 'card', style: 'margin-bottom:16px' });
+  upcomingCard.appendChild(el('div', { class: 'section-header' },
+    el('h2', {}, 'Upcoming dates'),
+    el('div', { class: 'section-sub' },
+      'Public holidays + your important dates over the next ~60 days. The planner uses these as anchor points.'),
+  ));
+  const upcomingBody = el('div');
+  upcomingCard.appendChild(upcomingBody);
+
+  (async () => {
+    upcomingBody.innerHTML = '<div class="loading"></div>';
+    const country = (brand && brand.country) || 'GB';
+    const today = new Date(); today.setHours(0,0,0,0);
+    const horizon = new Date(today.getTime() + 60 * 24 * 60 * 60 * 1000);
+    let holidays = [];
+    try {
+      const r = await api(`/api/brand/holidays?country=${encodeURIComponent(country)}&year=${today.getFullYear()}`);
+      holidays = (r.holidays || []).map(h => ({ date: h.date, name: h.name, source: 'public' }));
+      // Also peek into next year if the horizon crosses Dec 31.
+      if (horizon.getFullYear() !== today.getFullYear()) {
+        const r2 = await api(`/api/brand/holidays?country=${encodeURIComponent(country)}&year=${horizon.getFullYear()}`);
+        holidays = holidays.concat((r2.holidays || []).map(h => ({ date: h.date, name: h.name, source: 'public' })));
+      }
+    } catch {}
+    if (stale(myGen)) return;
+
+    // Brand special dates → expand to actual dates in the window. Annual ones
+    // fire on this year's M/D; one-offs use the original year if known
+    // (we don't store year for brand_special_dates so treat as annual).
+    const expanded = [];
+    for (const d of brandDates || []) {
+      const tryYears = [today.getFullYear(), today.getFullYear() + 1];
+      for (const y of tryYears) {
+        const dt = new Date(y, d.month - 1, d.day);
+        if (dt >= today && dt <= horizon) {
+          expanded.push({
+            date: dt.toISOString().slice(0, 10),
+            name: d.name,
+            source: 'brand',
+          });
+        }
+      }
+    }
+
+    const all = holidays.concat(expanded)
+      .filter(h => {
+        const dt = new Date(h.date);
+        return dt >= today && dt <= horizon;
+      })
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    upcomingBody.innerHTML = '';
+    if (!all.length) {
+      upcomingBody.innerHTML = '<div style="color:var(--text-dim); font-size:13px; padding:10px">No upcoming holidays or important dates in the next 60 days.</div>';
+      return;
+    }
+    const grid = el('div', { class: 'holidays-grid' });
+    for (const h of all) {
+      const dt = new Date(h.date);
+      grid.appendChild(el('div', { class: 'holiday-row' },
+        el('div', { class: 'holiday-date' },
+          el('div', { class: 'holiday-day' }, String(dt.getDate())),
+          el('div', { class: 'holiday-month' }, dt.toLocaleString(undefined, { month: 'short' })),
+        ),
+        el('div', { class: 'holiday-info' },
+          el('div', { class: 'holiday-name' }, h.name),
+          el('div', { class: 'holiday-meta' }, h.source === 'brand' ? 'your business' : 'public holiday'),
+        ),
+      ));
+    }
+    upcomingBody.appendChild(grid);
+  })();
+
+  root.appendChild(upcomingCard);
+
   if (!plans.length) {
     root.appendChild(el('div', { class: 'card' },
       el('div', { class: 'empty-state' },
         el('h3', {}, 'No content plans yet'),
-        el('p', {}, 'Let AI build a monthly calendar for you — tailored to your business, the month\'s holidays, and your target audience.'),
+        el('p', {}, 'The AI planner will use the dates above (plus your business profile) to draft a month of posts.'),
         el('button', { class: 'btn btn-primary', onclick: () => openPlanWizard() }, '+ Create your first plan'),
       ),
     ));
