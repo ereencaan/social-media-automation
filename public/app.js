@@ -66,7 +66,50 @@ function toast(message, kind = 'info', timeoutMs = 3500) {
 const State = {
   user: null,
   route: 'dashboard',
+  // Background jobs that should outlive view navigation. Keyed by a uuid.
+  // Each entry: { id, label, status: 'running'|'done'|'error', startedAt }
+  activeJobs: new Map(),
 };
+
+// ---- background-job UI ----------------------------------------------------
+// A persistent floating pill, mounted once at app boot (not per-view), that
+// shows running jobs (Generate, Plan auto-build, …). Lets the user navigate
+// freely without the in-flight work getting cancelled or hidden.
+function renderJobPill() {
+  let host = document.getElementById('job-pill-host');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'job-pill-host';
+    document.body.appendChild(host);
+  }
+  host.innerHTML = '';
+  if (!State.activeJobs.size) return;
+  for (const job of State.activeJobs.values()) {
+    const pill = document.createElement('div');
+    pill.className = 'job-pill ' + (job.status === 'error' ? 'job-pill-error' : 'job-pill-running');
+    pill.innerHTML = job.status === 'running'
+      ? `<span class="job-pill-dot"></span><span>${job.label}</span>`
+      : `<span>${job.label}</span>`;
+    host.appendChild(pill);
+  }
+}
+
+function startJob(label) {
+  const id = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now());
+  State.activeJobs.set(id, { id, label, status: 'running', startedAt: Date.now() });
+  renderJobPill();
+  return id;
+}
+function updateJob(id, patch) {
+  const j = State.activeJobs.get(id);
+  if (!j) return;
+  Object.assign(j, patch);
+  renderJobPill();
+  // Auto-clear finished jobs after a short pause so the user sees the pill flip.
+  if (patch.status && patch.status !== 'running') {
+    setTimeout(() => { State.activeJobs.delete(id); renderJobPill(); }, 4000);
+  }
+}
 
 async function loadSession() {
   try {
@@ -1032,61 +1075,44 @@ VIEWS.posts = async function postsView(root, myGen) {
     form.firstChild,
   );
 
-  form.onsubmit = async (e) => {
+  form.onsubmit = (e) => {
     e.preventDefault();
     const fd = new FormData(form);
-    // Multi-select via repeated `platforms` checkboxes — getAll returns all
-    // checked values. Fall back to ['instagram'] if user unchecked all.
     const selectedPlatforms = fd.getAll('platforms');
     const platforms = selectedPlatforms.length ? selectedPlatforms : ['instagram'];
     const format = fd.get('format');
-    // Checkbox default: present iff checked. When toggle hidden (no profile),
-    // onBrand is true but business context is empty anyway.
     const onBrand = hasBizProfile ? fd.get('onBrand') === 'on' : true;
-    // Always quality-gate on, single draft. Server auto-refines low-score
-    // drafts; we don't give the user a knob to publish junk.
     const qualityGate = true;
     const variants = 1;
     const endpoint = format === 'video' ? '/api/posts/generate-video' : '/api/posts/generate';
-    const btn = form.querySelector('button[type=submit]');
-    btn.disabled = true;
-    btn.innerHTML = '<span class="loading"></span> Generating…';
+    const promptText = fd.get('prompt');
 
-    // Scripted progress timeline. The orchestrator doesn't stream events, so
-    // we advance through phases that match the typical server timing.
-    const phases = [
-      { ms:    0, text: 'Writing a draft tailored to your brand…' },
-      { ms: 4000, text: 'Multi-model review (Claude · GPT-4 · Gemini)…' },
-      { ms: 9000, text: 'Refining the draft if any reviewer scored low…' },
-      { ms: format === 'video' ? 14000 : 12000, text:
-          format === 'video' ? 'Generating video (Runway, ~60–90s)…' : 'Generating image (Flux)…' },
-    ];
-    statusLine.classList.remove('hidden');
-    statusLine.textContent = phases[0].text;
-    const timers = phases.slice(1).map(p =>
-      setTimeout(() => { statusLine.textContent = p.text; }, p.ms));
-    const clearTimers = () => timers.forEach(clearTimeout);
+    // Reset the form immediately so the user can keep working / generate
+    // another / navigate elsewhere. The fetch runs detached.
+    form.reset();
+    statusLine.classList.add('hidden');
+    toast('Generating post in the background — you can keep working.', 'info', 3500);
 
-    try {
-      const result = await api(endpoint, {
-        method: 'POST',
-        body: { prompt: fd.get('prompt'), platforms, onBrand, qualityGate, variants },
-      });
-      clearTimers();
+    const jobId = startJob(`Generating post (${platforms.join(', ')})…`);
+
+    // Detached fetch — survives view changes. Result handler is allowed to
+    // fire even if the user is on another page; we toast + refresh Posts
+    // list lazily via a route nudge.
+    api(endpoint, {
+      method: 'POST',
+      body: { prompt: promptText, platforms, onBrand, qualityGate, variants },
+    }).then((result) => {
       const msg = result.quality
-        ? `Post generated — quality ${result.quality.score}/100${result.quality.refined ? ' (auto-refined)' : ''}`
-        : 'Post generated';
-      toast(msg, 'success');
-      form.reset();
-      navigate('posts', { replace: true });
-    } catch (err) {
-      clearTimers();
-      toast(err.message, 'error');
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Generate';
-      statusLine.classList.add('hidden');
-    }
+        ? `Post ready — quality ${result.quality.score}/100${result.quality.refined ? ' (auto-refined)' : ''}`
+        : 'Post ready';
+      updateJob(jobId, { status: 'done', label: msg });
+      toast(msg + ' · click Posts to view.', 'success', 6000);
+      // If the user is currently on Posts, refresh it so the new post shows.
+      if ((location.hash || '').includes('posts')) navigate('posts', { replace: true });
+    }).catch((err) => {
+      updateJob(jobId, { status: 'error', label: 'Generate failed: ' + err.message });
+      toast('Generate failed: ' + err.message, 'error', 6000);
+    });
   };
   gen.appendChild(form);
   root.appendChild(gen);

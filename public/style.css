@@ -868,6 +868,34 @@ tr.clickable:hover { background: var(--surface-2); }
   line-height: 1.4;
 }
 
+/* ---- Background job pill (persists across navigation) ------------------- */
+#job-pill-host {
+  position: fixed; bottom: 20px; right: 20px;
+  display: flex; flex-direction: column; gap: 8px;
+  z-index: 1100;
+  pointer-events: none;
+}
+.job-pill {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--shadow-lg);
+  font-size: 13px;
+  color: var(--text);
+  pointer-events: auto;
+  animation: job-pill-in 0.18s ease-out;
+}
+@keyframes job-pill-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.job-pill-running { border-color: var(--accent); }
+.job-pill-error { border-color: var(--danger); color: var(--danger); }
+.job-pill-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1s ease-in-out infinite;
+}
+
 /* ---- Generator UX (Posts) ------------------------------------------------ */
 .gen-explainer {
   font-size: 12.5px;
