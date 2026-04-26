@@ -124,12 +124,19 @@ async function orchestrateContent(prompt, platforms = ['instagram'], opts = {}) 
   let refined  = false;
   let refinementNotes = '';
 
-  // ---- 4. Refine once if the winner is still below the threshold -------
-  if (
+  // ---- 4. Refine LOOP: keep iterating while score is below threshold ----
+  // Up to MAX_REFINE_ROUNDS attempts. Each round feeds the latest critique
+  // back to Claude. We keep the best draft seen so far (in case one round
+  // regresses), but stop early if any draft hits or exceeds the threshold.
+  const MAX_REFINE_ROUNDS = 3;
+  let rounds = 0;
+  while (
     critique.overall < REFINE_THRESHOLD &&
     critique.suggestions.length &&
-    !critique._error
+    !critique._error &&
+    rounds < MAX_REFINE_ROUNDS
   ) {
+    rounds++;
     try {
       const improved = await refineContent({
         previous: winner,
@@ -142,16 +149,20 @@ async function orchestrateContent(prompt, platforms = ['instagram'], opts = {}) 
       const newCritique = await critiqueContent({
         content: improved, business, prompt, platforms,
       });
-      // Only accept the refinement if it actually moved the score up —
-      // otherwise the original draft was already the best we could do.
+      // Always promote the candidate with the higher score so we walk uphill.
       if (newCritique.overall > critique.overall) {
         winner = improved;
-        refinementNotes = `Refined based on: ${critique.suggestions.slice(0, 3).join(' | ')}`;
+        refinementNotes = `Refined ×${rounds} based on: ${critique.suggestions.slice(0, 3).join(' | ')}`;
         critique = newCritique;
         refined = true;
+        if (newCritique.overall >= REFINE_THRESHOLD) break;
+      } else {
+        // No improvement this round — the suggestions were exhausted.
+        break;
       }
     } catch (err) {
-      console.error('[orchestrator] refine failed:', err.message);
+      console.error('[orchestrator] refine round %d failed:', rounds, err.message);
+      break;
     }
   }
 

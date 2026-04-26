@@ -72,7 +72,18 @@ async function generateContent(prompt, platforms = ['instagram'], opts = {}) {
     systemParts.push(
       'CRITICAL: The content MUST reflect the following business. Every post, caption, hashtag, and image prompt must be clearly connected to what this business actually does and who it serves. Do not output generic content disconnected from the business. If the user\'s topic is seasonal or general, connect it back to the business.',
       '\n--- BUSINESS PROFILE ---\n' + businessBlock + '\n--- END BUSINESS PROFILE ---',
+      // Force specifics — generic IT / SaaS clichés get the post rejected.
+      'BANNED phrases (too generic): "we deliver quality", "industry-leading", "world-class", "best in class", "let us help you", "transform your business". Use specific outcomes (numbers, named services, named workflow steps) drawn from the business description.',
+      'HASHTAG RULE: Hashtags MUST be niche to this business or its industry. ' +
+      'NO broad single-word tags like #technology, #business, #UK, #marketing. ' +
+      'Use 8–12 specific tags (e.g. for a workflow-automation firm: #workflowAutomation #SaaSIntegration #processOptimization #lowCodeUK).',
+      'IMAGE PROMPT RULE: Describe a scene that visibly depicts THIS business — its product, its service in action, or its branded environment. Mention the business name on a sign / screen / wall if visually plausible. NO stock-photo developer-at-laptop scenes unless that is literally the business.',
     );
+    if (opts.business && opts.business.content_language) {
+      systemParts.push(
+        `LANGUAGE: All caption + hashtag + platform copy MUST be in ${opts.business.content_language}. The user's prompt may be in another language — translate / interpret it but write the output in ${opts.business.content_language}. Do NOT mix languages.`,
+      );
+    }
     const contact = buildContactBlock(opts.business);
     if (contact) {
       systemParts.push(
