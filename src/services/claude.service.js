@@ -124,7 +124,34 @@ Respond with ONLY raw JSON (no markdown fences) matching this schema:
   const text = response.content[0].text.trim();
   // Strip accidental ```json fences just in case
   const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '');
-  return JSON.parse(cleaned);
+  const parsed = JSON.parse(cleaned);
+  return appendContactBlock(parsed, opts.business, opts.onBrand !== false);
+}
+
+// Server-side guarantee: stamp the brand contact line on every caption
+// (and every per-platform caption) before we return. Claude was treating
+// the system-prompt instruction as a soft suggestion and dropping it.
+function appendContactBlock(content, business, onBrand) {
+  if (!onBrand || !business || !content) return content;
+  const contact = buildContactBlock(business);
+  if (!contact) return content;
+  // Skip if Claude already included the contact line (avoid double-stamping).
+  const alreadyHas = (s) => typeof s === 'string'
+    && (
+      (business.website && s.includes(business.website)) ||
+      (business.phone && s.includes(business.phone)) ||
+      (business.whatsapp && s.includes(business.whatsapp))
+    );
+  const stamp = (s) => (typeof s === 'string' && !alreadyHas(s))
+    ? s.trimEnd() + '\n\n' + contact
+    : s;
+  if (content.caption) content.caption = stamp(content.caption);
+  if (content.platformCaptions && typeof content.platformCaptions === 'object') {
+    for (const k of Object.keys(content.platformCaptions)) {
+      content.platformCaptions[k] = stamp(content.platformCaptions[k]);
+    }
+  }
+  return content;
 }
 
 /**
@@ -183,7 +210,8 @@ Return ONLY raw JSON.`;
   });
   const text = response.content[0].text.trim();
   const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '');
-  return JSON.parse(cleaned);
+  const parsed = JSON.parse(cleaned);
+  return appendContactBlock(parsed, business, onBrand);
 }
 
 module.exports = { generateContent, refineContent };
