@@ -33,15 +33,22 @@ function verifySignature(req) {
     console.error('[MetaWebhook] META_APP_SECRET not set — rejecting');
     return false;
   }
+  const raw = req.rawBody || Buffer.from('');
   const expected = 'sha256=' + crypto
     .createHmac('sha256', secret)
-    .update(req.rawBody || Buffer.from(''))
+    .update(raw)
     .digest('hex');
-  // Constant-time compare to avoid timing oracles
-  const a = Buffer.from(sig);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(a, b);
+  const ok = (sig.length === expected.length) &&
+    crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
+  if (!ok) {
+    // Debug: surface enough to diagnose without leaking the secret.
+    console.warn('[MetaWebhook] signature mismatch details',
+      'rawLen=', raw.length,
+      'secretLen=', secret.length,
+      'received=', sig,
+      'expected=', expected);
+  }
+  return ok;
 }
 
 // ---- GET /webhooks/meta — verification handshake ---------------------
