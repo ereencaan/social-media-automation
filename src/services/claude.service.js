@@ -27,9 +27,26 @@ function buildBusinessBlock(business) {
   if (business.target_audience)      lines.push(`Target audience: ${business.target_audience}`);
   if (business.tone_of_voice)        lines.push(`Preferred tone of voice: ${business.tone_of_voice}`);
   if (business.content_language)     lines.push(`Write the content in: ${business.content_language}`);
+  // Contact / handles — explicit so Claude can append them to captions.
   if (business.website)              lines.push(`Website: ${business.website}`);
+  if (business.phone)                lines.push(`Phone: ${business.phone}`);
+  if (business.whatsapp)             lines.push(`WhatsApp: ${business.whatsapp}`);
   if (business.instagram_handle)     lines.push(`Instagram: @${String(business.instagram_handle).replace(/^@/, '')}`);
+  if (business.facebook_handle)      lines.push(`Facebook: ${business.facebook_handle}`);
+  if (business.linkedin_handle)      lines.push(`LinkedIn: ${business.linkedin_handle}`);
   return lines.length ? lines.join('\n') : null;
+}
+
+// Pull just the contact-info subset (used to instruct Claude to append a
+// reach-out block at the end of every caption).
+function buildContactBlock(business) {
+  if (!business) return null;
+  const parts = [];
+  if (business.website)          parts.push(`🌐 ${business.website}`);
+  if (business.whatsapp)         parts.push(`📲 WhatsApp ${business.whatsapp}`);
+  else if (business.phone)       parts.push(`📞 ${business.phone}`);
+  if (business.instagram_handle) parts.push(`📷 @${String(business.instagram_handle).replace(/^@/, '')}`);
+  return parts.length ? parts.join('  ·  ') : null;
 }
 
 /**
@@ -56,6 +73,12 @@ async function generateContent(prompt, platforms = ['instagram'], opts = {}) {
       'CRITICAL: The content MUST reflect the following business. Every post, caption, hashtag, and image prompt must be clearly connected to what this business actually does and who it serves. Do not output generic content disconnected from the business. If the user\'s topic is seasonal or general, connect it back to the business.',
       '\n--- BUSINESS PROFILE ---\n' + businessBlock + '\n--- END BUSINESS PROFILE ---',
     );
+    const contact = buildContactBlock(opts.business);
+    if (contact) {
+      systemParts.push(
+        'CONTACT BLOCK: End every caption with a single short line that gives the reader an obvious way to reach the business. Use exactly this content (you may reformat the icons but keep the values verbatim, do not invent any details that are not listed):\n' + contact,
+      );
+    }
   }
 
   const userMessage = `Topic / brief from the user:
@@ -110,6 +133,12 @@ async function refineContent({ previous, critique, prompt, platforms = ['instagr
       'CRITICAL: The content MUST still clearly reflect this business:\n--- BUSINESS PROFILE ---\n' +
       businessBlock + '\n--- END BUSINESS PROFILE ---',
     );
+    const contact = buildContactBlock(business);
+    if (contact) {
+      systemParts.push(
+        'CONTACT BLOCK: End every caption with a single short line giving the reader an obvious way to reach the business. Use exactly this content (icons may be reformatted, values must remain verbatim):\n' + contact,
+      );
+    }
   }
 
   const userMessage = `Original topic:
