@@ -899,7 +899,17 @@ VIEWS.posts = async function postsView(root, myGen) {
 
   // --- Analyze & Rewrite handlers ---
   let lastAnalysis = null;
-  const platformSelect = () => (form.querySelector('[name=platforms]') || {}).value || 'instagram';
+  // Multi-checkbox version: gather all checked platform inputs, default to instagram.
+  const platformSelect = () => {
+    const checked = Array.from(form.querySelectorAll('input[name=platforms]:checked'))
+      .map((el) => el.value);
+    return checked[0] || 'instagram';
+  };
+  const allSelectedPlatforms = () => {
+    const checked = Array.from(form.querySelectorAll('input[name=platforms]:checked'))
+      .map((el) => el.value);
+    return checked.length ? checked : ['instagram'];
+  };
 
   analyzeBtn.onclick = async () => {
     const prompt = promptTextarea.value.trim();
@@ -946,15 +956,26 @@ VIEWS.posts = async function postsView(root, myGen) {
   };
   form.appendChild(el('div', { class: 'row' },
     el('div', { class: 'field' },
-      el('label', {}, 'Platform',
+      el('label', {}, 'Platforms',
+        // Multi-select chip group. Same caption + image gets cross-posted to
+        // every selected platform on Generate. Default: Instagram only.
         (() => {
-          const s = el('select', { name: 'platforms' });
+          const wrap = el('div', { class: 'chip-group' });
           [
-            ['instagram', 'Instagram'],
-            ['linkedin',  'LinkedIn'],
-            ['facebook',  'Facebook'],
-          ].forEach(([v, t]) => s.appendChild(el('option', { value: v }, t)));
-          return s;
+            ['instagram', '📷 Instagram'],
+            ['linkedin',  '💼 LinkedIn'],
+            ['facebook',  '👥 Facebook'],
+          ].forEach(([v, t], i) => {
+            const id = `plat-${v}`;
+            const cb = el('input', {
+              type: 'checkbox', name: 'platforms', value: v, id,
+              ...(i === 0 ? { checked: 'checked' } : {}),
+            });
+            const lab = el('label', { for: id, class: 'chip-label' }, t);
+            wrap.appendChild(cb);
+            wrap.appendChild(lab);
+          });
+          return wrap;
         })(),
       ),
     ),
@@ -986,34 +1007,9 @@ VIEWS.posts = async function postsView(root, myGen) {
     ));
   }
 
-  // Orchestration / quality controls
-  form.appendChild(el('div', { class: 'field' },
-    el('label', { class: 'switch-row' },
-      el('input', { type: 'checkbox', name: 'qualityGate', checked: 'checked' }),
-      el('span', { class: 'switch' }),
-      el('span', { class: 'switch-label' },
-        el('strong', {}, 'Quality gate'),
-        el('span', { class: 'switch-hint' }, 'Second AI reviews the draft, auto-refines if score < 75. Adds a few seconds.'),
-      ),
-    ),
-  ));
-  form.appendChild(el('div', { class: 'field' },
-    el('label', {}, 'Parallel drafts',
-      (() => {
-        const s = el('select', { name: 'variants' });
-        [
-          ['1', '1 · fastest'],
-          ['2', '2 · compare 2 drafts, pick the best'],
-          ['3', '3 · best quality (slower, ~3× cost)'],
-        ].forEach(([v, t]) => {
-          const o = el('option', { value: v }, t);
-          if (v === '1') o.selected = true;
-          s.appendChild(o);
-        });
-        return s;
-      })(),
-    ),
-  ));
+  // Quality is always on — we never hand the user the option to publish a
+  // sub-par post. Server forces qualityGate=true and variants=1 (with
+  // automatic refine when score < 75).
 
   form.appendChild(el('div', { class: 'form-actions' },
     el('button', { type: 'submit', class: 'btn btn-primary' }, 'Generate'),
@@ -1022,13 +1018,18 @@ VIEWS.posts = async function postsView(root, myGen) {
   form.onsubmit = async (e) => {
     e.preventDefault();
     const fd = new FormData(form);
-    const platform = fd.get('platforms');
+    // Multi-select via repeated `platforms` checkboxes — getAll returns all
+    // checked values. Fall back to ['instagram'] if user unchecked all.
+    const selectedPlatforms = fd.getAll('platforms');
+    const platforms = selectedPlatforms.length ? selectedPlatforms : ['instagram'];
     const format = fd.get('format');
     // Checkbox default: present iff checked. When toggle hidden (no profile),
     // onBrand is true but business context is empty anyway.
     const onBrand = hasBizProfile ? fd.get('onBrand') === 'on' : true;
-    const qualityGate = fd.get('qualityGate') === 'on';
-    const variants = Math.max(1, Math.min(3, Number(fd.get('variants')) || 1));
+    // Always quality-gate on, single draft. Server auto-refines low-score
+    // drafts; we don't give the user a knob to publish junk.
+    const qualityGate = true;
+    const variants = 1;
     const endpoint = format === 'video' ? '/api/posts/generate-video' : '/api/posts/generate';
     const btn = form.querySelector('button[type=submit]');
     btn.disabled = true;
@@ -1036,7 +1037,7 @@ VIEWS.posts = async function postsView(root, myGen) {
     try {
       const result = await api(endpoint, {
         method: 'POST',
-        body: { prompt: fd.get('prompt'), platforms: [platform], onBrand, qualityGate, variants },
+        body: { prompt: fd.get('prompt'), platforms, onBrand, qualityGate, variants },
       });
       const msg = result.quality
         ? `Post generated — quality ${result.quality.score}/100${result.quality.refined ? ' (auto-refined)' : ''}`

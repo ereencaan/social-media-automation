@@ -859,6 +859,33 @@ tr.clickable:hover { background: var(--surface-2); }
   overflow-x: auto;
   white-space: pre;
 }
+
+/* ---- Multi-select chip group (e.g. platform picker) -------------------- */
+.chip-group { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip-group input[type="checkbox"] {
+  position: absolute; opacity: 0; pointer-events: none;
+}
+.chip-label {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  color: var(--text-dim);
+  font-size: 13px; font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s ease;
+}
+.chip-label:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.chip-group input[type="checkbox"]:checked + .chip-label {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-hover);
+}
 .intake-url-field-sm { padding: 4px 4px 4px 10px; margin-top: 8px; }
 .intake-url-field-sm .intake-url { font-size: 11.5px; padding: 6px 0; }
 
