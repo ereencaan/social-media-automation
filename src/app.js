@@ -13,7 +13,15 @@ const PORT = process.env.PORT || 3000;
 app.set('trust proxy', 1);
 
 // Middleware
-app.use(express.json());
+//
+// Capture the raw request body on every JSON parse. Meta's webhook
+// signature (X-Hub-Signature-256) is HMAC'd against the exact bytes Meta
+// sent — once express.json() has parsed and consumed the stream, the
+// raw form is gone unless we stash it here. Doing it at the global
+// parser keeps the webhook route from needing its own parser ordering.
+app.use(express.json({
+  verify: (req, _res, buf) => { req.rawBody = buf; },
+}));
 if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
   throw new Error('SESSION_SECRET must be set in production');
 }

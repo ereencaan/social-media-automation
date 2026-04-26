@@ -22,13 +22,8 @@ const router = express.Router();
 const { prepare } = require('../config/database');
 const leadsService = require('../services/leads.service');
 
-// Capture the raw body ONLY for this router so we can HMAC-verify it.
-// express.json's verify hook runs during parsing and stows the raw Buffer
-// on req.rawBody — that's the bytes Meta signed.
-router.use(express.json({
-  verify: (req, _res, buf) => { req.rawBody = buf; },
-  limit: '1mb',
-}));
+// req.rawBody is captured globally in src/app.js by the express.json
+// verify hook — needed to HMAC-verify Meta's X-Hub-Signature-256.
 
 function verifySignature(req) {
   const sig = req.get('X-Hub-Signature-256');
