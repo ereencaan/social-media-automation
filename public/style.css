@@ -860,6 +860,65 @@ tr.clickable:hover { background: var(--surface-2); }
   white-space: pre;
 }
 
+/* ---- Field hint ---------------------------------------------------------- */
+.field-hint {
+  font-size: 11.5px;
+  color: var(--text-mute);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+/* ---- Generator UX (Posts) ------------------------------------------------ */
+.gen-explainer {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  line-height: 1.55;
+}
+.gen-explainer strong { color: var(--text); }
+.gen-status {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--accent-hover);
+  display: flex; align-items: center; gap: 8px;
+}
+.gen-status::before {
+  content: ""; width: 8px; height: 8px;
+  border-radius: 50%; background: var(--accent);
+  animation: pulse 1s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50%      { opacity: 1;   transform: scale(1.4); }
+}
+
+/* ---- Holidays grid ------------------------------------------------------- */
+.holidays-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+.holiday-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+}
+.holiday-date {
+  text-align: center; min-width: 44px;
+  color: var(--accent-hover);
+}
+.holiday-day { font-size: 18px; font-weight: 700; line-height: 1; }
+.holiday-month { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 2px; }
+.holiday-info { flex: 1; min-width: 0; }
+.holiday-name { font-size: 13px; font-weight: 500; color: var(--text); }
+.holiday-meta { font-size: 11px; color: var(--text-mute); margin-top: 2px; text-transform: capitalize; }
+
 /* ---- Multi-select chip group (e.g. platform picker) -------------------- */
 .chip-group { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip-group input[type="checkbox"] {

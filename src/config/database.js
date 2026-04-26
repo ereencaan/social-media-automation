@@ -134,6 +134,10 @@ async function init() {
     ['target_audience',      'TEXT'],
     ['tone_of_voice',        'TEXT'],
     ['content_language',     'TEXT'],
+    // Calendar inputs — country drives public-holiday lookup, founding
+    // date seeds an "anniversary" entry without the user adding it by hand.
+    ['country',              'TEXT'],   // ISO 3166-1 alpha-2 (e.g. 'GB','TR','US')
+    ['founding_date',        'TEXT'],   // ISO date (YYYY-MM-DD)
   ];
   for (const [name, type] of wantedCols) {
     if (!existingCols.has(name)) {

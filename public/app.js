@@ -1015,6 +1015,23 @@ VIEWS.posts = async function postsView(root, myGen) {
     el('button', { type: 'submit', class: 'btn btn-primary' }, 'Generate'),
   ));
 
+  // Inline status that walks the user through what's happening during gen.
+  // We can't get real-time progress from the orchestrator, so we play a
+  // scripted timeline that matches the actual server pipeline: write →
+  // multi-model review → optional refine → image gen → done.
+  const statusLine = el('div', { class: 'gen-status hidden' });
+  form.appendChild(statusLine);
+
+  // Tiny "what does this do" explainer shown above the form.
+  form.insertBefore(
+    el('div', { class: 'gen-explainer' },
+      el('strong', {}, 'How this works: '),
+      'Claude writes a draft tailored to your brand profile, then GPT-4 + Gemini score it on 5 axes. ',
+      'If the score is low, the draft is auto-refined before image generation. You only ever see the polished result.',
+    ),
+    form.firstChild,
+  );
+
   form.onsubmit = async (e) => {
     e.preventDefault();
     const fd = new FormData(form);
@@ -1034,11 +1051,28 @@ VIEWS.posts = async function postsView(root, myGen) {
     const btn = form.querySelector('button[type=submit]');
     btn.disabled = true;
     btn.innerHTML = '<span class="loading"></span> Generating…';
+
+    // Scripted progress timeline. The orchestrator doesn't stream events, so
+    // we advance through phases that match the typical server timing.
+    const phases = [
+      { ms:    0, text: 'Writing a draft tailored to your brand…' },
+      { ms: 4000, text: 'Multi-model review (Claude · GPT-4 · Gemini)…' },
+      { ms: 9000, text: 'Refining the draft if any reviewer scored low…' },
+      { ms: format === 'video' ? 14000 : 12000, text:
+          format === 'video' ? 'Generating video (Runway, ~60–90s)…' : 'Generating image (Flux)…' },
+    ];
+    statusLine.classList.remove('hidden');
+    statusLine.textContent = phases[0].text;
+    const timers = phases.slice(1).map(p =>
+      setTimeout(() => { statusLine.textContent = p.text; }, p.ms));
+    const clearTimers = () => timers.forEach(clearTimeout);
+
     try {
       const result = await api(endpoint, {
         method: 'POST',
         body: { prompt: fd.get('prompt'), platforms, onBrand, qualityGate, variants },
       });
+      clearTimers();
       const msg = result.quality
         ? `Post generated — quality ${result.quality.score}/100${result.quality.refined ? ' (auto-refined)' : ''}`
         : 'Post generated';
@@ -1046,10 +1080,12 @@ VIEWS.posts = async function postsView(root, myGen) {
       form.reset();
       navigate('posts', { replace: true });
     } catch (err) {
+      clearTimers();
       toast(err.message, 'error');
     } finally {
       btn.disabled = false;
       btn.textContent = 'Generate';
+      statusLine.classList.add('hidden');
     }
   };
   gen.appendChild(form);
@@ -2274,6 +2310,39 @@ VIEWS.brand = async function brandView(root, myGen) {
     ], brand.content_language),
   ));
 
+  // Country + founding date — both feed the calendar planner so the user
+  // doesn't need to enter public holidays or anniversary by hand.
+  bizForm.appendChild(bizRow(
+    selectField('country', 'Country', [
+      ['GB', 'United Kingdom'],
+      ['TR', 'Türkiye'],
+      ['US', 'United States'],
+      ['DE', 'Germany'],
+      ['FR', 'France'],
+      ['IT', 'Italy'],
+      ['ES', 'Spain'],
+      ['NL', 'Netherlands'],
+      ['IE', 'Ireland'],
+      ['CA', 'Canada'],
+      ['AU', 'Australia'],
+      ['NZ', 'New Zealand'],
+      ['AE', 'United Arab Emirates'],
+      ['SA', 'Saudi Arabia'],
+      ['IN', 'India'],
+    ], brand.country),
+    el('div', { class: 'field' },
+      el('label', {}, 'Founding date',
+        el('input', {
+          type: 'date',
+          name: 'founding_date',
+          value: brand.founding_date || '',
+        }),
+        el('div', { class: 'field-hint' },
+          'We will auto-add your company anniversary to the content plan every year.'),
+      ),
+    ),
+  ));
+
   bizForm.appendChild(el('div', { class: 'form-actions' },
     el('button', { type: 'submit', class: 'btn btn-primary' }, 'Save profile'),
   ));
@@ -2288,6 +2357,58 @@ VIEWS.brand = async function brandView(root, myGen) {
   };
   bizCard.appendChild(bizForm);
   root.appendChild(bizCard);
+
+  // ---- COUNTRY HOLIDAYS PREVIEW ----
+  // Read-only list pulled from /api/brand/holidays for the brand's country.
+  // Shows the user what the planner will automatically include — they don't
+  // need to add bank holidays by hand.
+  const holidaysCard = el('div', { class: 'card', style: 'margin-top:20px' });
+  holidaysCard.appendChild(el('div', { class: 'section-header' },
+    el('h2', {}, 'Public holidays'),
+    el('div', { class: 'section-sub' },
+      'Automatically pulled from your country. The content planner uses these as anchor dates — no manual entry needed.'),
+  ));
+  const holidaysBody = el('div');
+  holidaysCard.appendChild(holidaysBody);
+  root.appendChild(holidaysCard);
+
+  async function refreshHolidays() {
+    const country = bizForm.querySelector('[name=country]')?.value || brand.country;
+    if (!country) {
+      holidaysBody.innerHTML = '<div style="color:var(--text-dim); font-size:13px; padding:10px">Pick a country in the profile above to see your public holidays.</div>';
+      return;
+    }
+    holidaysBody.innerHTML = '<div class="loading"></div>';
+    try {
+      const r = await api(`/api/brand/holidays?country=${encodeURIComponent(country)}`);
+      if (stale(myGen)) return;
+      holidaysBody.innerHTML = '';
+      if (!r.holidays?.length) {
+        holidaysBody.innerHTML = `<div style="color:var(--text-dim); font-size:13px; padding:10px">No holidays found for ${country}.</div>`;
+        return;
+      }
+      const grid = el('div', { class: 'holidays-grid' });
+      r.holidays.forEach(h => {
+        const d = new Date(h.date);
+        grid.appendChild(el('div', { class: 'holiday-row' },
+          el('div', { class: 'holiday-date' },
+            el('div', { class: 'holiday-day' }, String(d.getDate())),
+            el('div', { class: 'holiday-month' }, d.toLocaleString(undefined, { month: 'short' })),
+          ),
+          el('div', { class: 'holiday-info' },
+            el('div', { class: 'holiday-name' }, h.name),
+            el('div', { class: 'holiday-meta' }, h.type),
+          ),
+        ));
+      });
+      holidaysBody.appendChild(grid);
+    } catch (err) {
+      holidaysBody.innerHTML = `<div class="auth-error show">${err.message}</div>`;
+    }
+  }
+  refreshHolidays();
+  // Refresh when the user changes country in the profile form (live preview).
+  bizForm.querySelector('[name=country]')?.addEventListener('change', refreshHolidays);
 
   // ---- IMPORTANT DATES CARD ----
   const datesCard = el('div', { class: 'card', style: 'margin-top:20px' });

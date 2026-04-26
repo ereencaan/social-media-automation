@@ -5,6 +5,8 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { prepare } = require('../config/database');
+const { generateId } = require('../utils/helpers');
+const Holidays = require('date-holidays');
 
 const ALLOWED_MIME = {
   'image/png':  '.png',
@@ -31,6 +33,8 @@ const UPDATABLE_FIELDS = [
   // Business profile (feeds the content generator)
   'business_name', 'industry', 'business_description',
   'target_audience', 'tone_of_voice', 'content_language',
+  // Calendar inputs
+  'country', 'founding_date',
 ];
 
 function ensureRow(orgId) {
@@ -95,8 +99,35 @@ router.put('/', (req, res) => {
   values.push(req.user.orgId);
 
   prepare(`UPDATE brand_settings SET ${updates.join(', ')} WHERE org_id = ?`).run(...values);
+
+  // Side effect: when founding_date is set or changed, ensure a
+  // "Company anniversary" entry exists in brand_special_dates so the
+  // planner picks it up every year automatically.
+  if ('founding_date' in req.body) {
+    upsertFoundingAnniversary(req.user.orgId, req.body.founding_date);
+  }
+
   res.json(getSettings(req.user.orgId));
 });
+
+function upsertFoundingAnniversary(orgId, foundingDateRaw) {
+  // Drop any prior auto-anniversary for this org (we tag note with a sentinel).
+  prepare(
+    "DELETE FROM brand_special_dates WHERE org_id = ? AND note = '__auto_founding_anniversary__'"
+  ).run(orgId);
+  if (!foundingDateRaw) return;
+  const m = String(foundingDateRaw).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return;
+  const year = Number(m[1]), month = Number(m[2]), day = Number(m[3]);
+  if (!month || !day) return;
+  prepare(`
+    INSERT INTO brand_special_dates (id, org_id, month, day, name, note, tier, annual)
+    VALUES (?, ?, ?, ?, ?, '__auto_founding_anniversary__', 1, 1)
+  `).run(
+    generateId(), orgId, month, day,
+    `Company anniversary (founded ${year})`,
+  );
+}
 
 // ---- POST /api/brand/logo -----------------------------------------------
 router.post('/logo', (req, res) => {
@@ -168,13 +199,33 @@ router.delete('/logo', (req, res) => {
   res.json(getSettings(req.user.orgId));
 });
 
+// ---- GET /api/brand/holidays?country=GB&year=2026 ------------------------
+// Read-only list of public holidays for the brand's country, computed live
+// from the `date-holidays` package. The planner pulls from the same source.
+router.get('/holidays', (req, res) => {
+  try {
+    const country = String(req.query.country || '').trim().toUpperCase();
+    if (!country) return res.status(400).json({ error: 'country query param required (ISO alpha-2)' });
+    const year = Number(req.query.year) || new Date().getFullYear();
+    const hd = new Holidays(country);
+    const list = (hd.getHolidays(year) || [])
+      .filter(h => h.type === 'public' || h.type === 'bank')
+      .map(h => ({
+        date: h.date.slice(0, 10),
+        name: h.name,
+        type: h.type,
+      }));
+    res.json({ country, year, holidays: list });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // ---- Business-specific important dates ------------------------------------
 // GET  /api/brand/dates         — list
 // POST /api/brand/dates         — create { month, day, name, note?, tier?, annual? }
 // PUT  /api/brand/dates/:id     — update
 // DELETE /api/brand/dates/:id   — remove
-const { generateId } = require('../utils/helpers');
-
 const DATE_UPDATABLE = ['month', 'day', 'name', 'note', 'tier', 'annual'];
 
 function validateDateInput(body) {

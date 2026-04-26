@@ -37,8 +37,10 @@ function businessCtx(b) {
 }
 
 function inferCountry(business) {
-  // Best-effort: most UK SMBs → default 'GB'. Later: add a country field
-  // to brand_settings.
+  // Explicit user choice always wins (set on Brand profile). Fall back to
+  // a domain TLD heuristic for legacy orgs that signed up before the
+  // country picker existed.
+  if (business && business.country) return String(business.country).toUpperCase();
   const site = (business && business.website) || '';
   if (/\.co\.uk\b/i.test(site)) return 'GB';
   if (/\.com\.tr\b|\.tr\b/i.test(site)) return 'TR';
