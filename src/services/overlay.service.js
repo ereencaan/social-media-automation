@@ -92,8 +92,10 @@ async function renderContactBarPng(brand, width) {
   const iconTextGap = Math.round(barH * 0.18);
   const padX    = Math.round(barH * 0.5);
 
-  // Layout pass: measure approx widths to center the group
-  const approxCharPx = fontSize * 0.55; // rough monospace-ish estimate
+  // Layout pass: measure approx widths to center the group. Bumped from
+  // 0.55 to 0.66 so digit-heavy items (phone numbers) don't crowd the
+  // next icon. Better to over-estimate width than overlap.
+  const approxCharPx = fontSize * 0.66;
   const measured = items.map((it) => {
     const textW = Math.ceil(it.text.length * approxCharPx);
     return { ...it, textW, totalW: iconSize + iconTextGap + textW };
@@ -117,7 +119,7 @@ async function renderContactBarPng(brand, width) {
   for (const it of measured) {
     const localIcon = Math.round(iconSize * scale);
     const localFont = Math.round(fontSize * scale);
-    const localTextW = Math.ceil(it.text.length * (localFont * 0.55));
+    const localTextW = Math.ceil(it.text.length * (localFont * 0.66));
     const yIcon = yBase;
     const yText = yBase;
 
@@ -140,14 +142,28 @@ async function renderContactBarPng(brand, width) {
 }
 
 function buildContactItems(brand) {
+  // Honour explicit toggle. NULL/undefined defaults to enabled so existing
+  // orgs keep the bar; only an explicit '0' / false hides it.
+  if (brand.overlay_contact_enabled === 0 || brand.overlay_contact_enabled === false) {
+    return [];
+  }
   const items = [];
-  if (brand.phone)            items.push({ icon: 'phone',     text: brand.phone });
-  if (brand.whatsapp)         items.push({ icon: 'whatsapp',  text: brand.whatsapp });
+  // Dedupe phone vs WhatsApp when they're the same number — only show
+  // WhatsApp (it's tappable). If they differ, show both.
+  const phone = brand.phone || '';
+  const wa = brand.whatsapp || '';
+  const sameNumber = phone && wa && normalizePhone(phone) === normalizePhone(wa);
+  if (wa) items.push({ icon: 'whatsapp', text: wa });
+  if (phone && !sameNumber) items.push({ icon: 'phone', text: phone });
   if (brand.website)          items.push({ icon: 'globe',     text: brand.website });
   if (brand.instagram_handle) items.push({ icon: 'instagram', text: '@' + String(brand.instagram_handle).replace(/^@/, '') });
   if (brand.facebook_handle)  items.push({ icon: 'facebook',  text: brand.facebook_handle });
   if (brand.linkedin_handle)  items.push({ icon: 'linkedin',  text: brand.linkedin_handle });
   return items;
+}
+
+function normalizePhone(s) {
+  return String(s || '').replace(/\D+/g, '');
 }
 
 /**

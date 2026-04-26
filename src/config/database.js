@@ -138,6 +138,9 @@ async function init() {
     // date seeds an "anniversary" entry without the user adding it by hand.
     ['country',              'TEXT'],   // ISO 3166-1 alpha-2 (e.g. 'GB','TR','US')
     ['founding_date',        'TEXT'],   // ISO date (YYYY-MM-DD)
+    // Overlay toggles — let the user opt out of the auto-stamped contact
+    // strip on rendered images / videos. Default 1 (on).
+    ['overlay_contact_enabled', 'INTEGER NOT NULL DEFAULT 1'],
   ];
   for (const [name, type] of wantedCols) {
     if (!existingCols.has(name)) {

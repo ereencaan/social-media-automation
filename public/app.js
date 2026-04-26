@@ -2268,7 +2268,7 @@ VIEWS.brand = async function brandView(root, myGen) {
   form.appendChild(row(
     iconField('facebook_handle', 'Facebook', 'hitratech', '👥'),
     el('div', { class: 'field' },
-      el('label', {}, 'Overlay position',
+      el('label', {}, 'Logo overlay position',
         (() => {
           const s = el('select', { name: 'overlay_position' });
           [
@@ -2283,6 +2283,26 @@ VIEWS.brand = async function brandView(root, myGen) {
           });
           return s;
         })(),
+      ),
+    ),
+  ));
+
+  // Contact strip toggle — same pattern as the logo, but optional.
+  // overlay_contact_enabled defaults to 1 (on) for brands that haven't
+  // explicitly opted out.
+  const contactEnabled = brand.overlay_contact_enabled === 0 ? false : true;
+  form.appendChild(el('div', { class: 'field' },
+    el('label', { class: 'switch-row' },
+      el('input', {
+        type: 'checkbox',
+        name: 'overlay_contact_enabled',
+        ...(contactEnabled ? { checked: 'checked' } : {}),
+      }),
+      el('span', { class: 'switch' }),
+      el('span', { class: 'switch-label' },
+        el('strong', {}, 'Contact strip on every image / video'),
+        el('span', { class: 'switch-hint' },
+          'Auto-stamps your phone / WhatsApp / website / handles along the bottom of generated media. Turn off if your visuals already include contact info.'),
       ),
     ),
   ));

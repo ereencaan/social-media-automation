@@ -29,7 +29,7 @@ const UPDATABLE_FIELDS = [
   // Visual identity
   'phone', 'whatsapp', 'website',
   'instagram_handle', 'facebook_handle', 'linkedin_handle',
-  'overlay_position', 'primary_color',
+  'overlay_position', 'primary_color', 'overlay_contact_enabled',
   // Business profile (feeds the content generator)
   'business_name', 'industry', 'business_description',
   'target_audience', 'tone_of_voice', 'content_language',
@@ -90,7 +90,13 @@ router.put('/', (req, res) => {
   for (const field of UPDATABLE_FIELDS) {
     if (field in req.body) {
       updates.push(`${field} = ?`);
-      values.push(req.body[field] ? String(req.body[field]) : null);
+      // Booleans (toggles) are stored as 0/1 ints, not strings.
+      if (field === 'overlay_contact_enabled') {
+        const v = req.body[field];
+        values.push((v === true || v === 1 || v === '1' || v === 'on') ? 1 : 0);
+      } else {
+        values.push(req.body[field] ? String(req.body[field]) : null);
+      }
     }
   }
   if (!updates.length) return res.status(400).json({ error: 'No fields to update' });
