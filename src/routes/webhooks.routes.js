@@ -38,17 +38,8 @@ function verifySignature(req) {
     .createHmac('sha256', secret)
     .update(raw)
     .digest('hex');
-  const ok = (sig.length === expected.length) &&
-    crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
-  if (!ok) {
-    // Debug: surface enough to diagnose without leaking the secret.
-    console.warn('[MetaWebhook] signature mismatch details',
-      'rawLen=', raw.length,
-      'secretLen=', secret.length,
-      'received=', sig,
-      'expected=', expected);
-  }
-  return ok;
+  if (sig.length !== expected.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
 }
 
 // ---- GET /webhooks/meta — verification handshake ---------------------
