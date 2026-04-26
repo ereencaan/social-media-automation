@@ -42,11 +42,20 @@ function buildBusinessBlock(business) {
 function buildContactBlock(business) {
   if (!business) return null;
   const parts = [];
-  if (business.website)          parts.push(`🌐 ${business.website}`);
-  if (business.whatsapp)         parts.push(`📲 WhatsApp ${business.whatsapp}`);
-  else if (business.phone)       parts.push(`📞 ${business.phone}`);
+  if (business.website) parts.push(`🌐 ${business.website}`);
+  // Dedupe phone vs WhatsApp when they're the same number — only show
+  // WhatsApp (it's actionable on tap). If they differ, show both.
+  const phone = business.phone || '';
+  const wa = business.whatsapp || '';
+  const sameNumber = phone && wa && normalizePhone(phone) === normalizePhone(wa);
+  if (wa) parts.push(`📲 WhatsApp ${wa}`);
+  if (phone && !sameNumber) parts.push(`📞 ${phone}`);
   if (business.instagram_handle) parts.push(`📷 @${String(business.instagram_handle).replace(/^@/, '')}`);
   return parts.length ? parts.join('  ·  ') : null;
+}
+
+function normalizePhone(s) {
+  return String(s || '').replace(/\D+/g, '');
 }
 
 /**
