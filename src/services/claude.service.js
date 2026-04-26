@@ -77,7 +77,9 @@ async function generateContent(prompt, platforms = ['instagram'], opts = {}) {
       'HASHTAG RULE: Hashtags MUST be niche to this business or its industry. ' +
       'NO broad single-word tags like #technology, #business, #UK, #marketing. ' +
       'Use 8–12 specific tags (e.g. for a workflow-automation firm: #workflowAutomation #SaaSIntegration #processOptimization #lowCodeUK).',
-      'IMAGE PROMPT RULE: Describe a scene that visibly depicts THIS business — its product, its service in action, or its branded environment. Mention the business name on a sign / screen / wall if visually plausible. NO stock-photo developer-at-laptop scenes unless that is literally the business.',
+      'IMAGE PROMPT RULE: Describe a scene that visibly depicts THIS business — its product, its service in action, or its branded environment. ' +
+      'CRITICAL: DO NOT include any logos, brand marks, written brand names, or any text/typography in the image. The real logo is overlaid in post-processing — if the image already contains a fake logo or brand text, it conflicts. Just describe the scene, lighting, subjects, mood. ' +
+      'NO stock-photo developer-at-laptop scenes unless that is literally the business.',
     );
     if (opts.business && opts.business.content_language) {
       systemParts.push(
