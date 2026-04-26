@@ -147,23 +147,17 @@ function buildContactItems(brand) {
   if (brand.overlay_contact_enabled === 0 || brand.overlay_contact_enabled === false) {
     return [];
   }
+  // If the user filled both phone AND whatsapp, we show both — they may
+  // be different lines (office landline + mobile) and it's not our job
+  // to second-guess that choice.
   const items = [];
-  // Dedupe phone vs WhatsApp when they're the same number — only show
-  // WhatsApp (it's tappable). If they differ, show both.
-  const phone = brand.phone || '';
-  const wa = brand.whatsapp || '';
-  const sameNumber = phone && wa && normalizePhone(phone) === normalizePhone(wa);
-  if (wa) items.push({ icon: 'whatsapp', text: wa });
-  if (phone && !sameNumber) items.push({ icon: 'phone', text: phone });
+  if (brand.phone)            items.push({ icon: 'phone',     text: brand.phone });
+  if (brand.whatsapp)         items.push({ icon: 'whatsapp',  text: brand.whatsapp });
   if (brand.website)          items.push({ icon: 'globe',     text: brand.website });
   if (brand.instagram_handle) items.push({ icon: 'instagram', text: '@' + String(brand.instagram_handle).replace(/^@/, '') });
   if (brand.facebook_handle)  items.push({ icon: 'facebook',  text: brand.facebook_handle });
   if (brand.linkedin_handle)  items.push({ icon: 'linkedin',  text: brand.linkedin_handle });
   return items;
-}
-
-function normalizePhone(s) {
-  return String(s || '').replace(/\D+/g, '');
 }
 
 /**

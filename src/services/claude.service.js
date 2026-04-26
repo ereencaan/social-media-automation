@@ -38,24 +38,17 @@ function buildBusinessBlock(business) {
 }
 
 // Pull just the contact-info subset (used to instruct Claude to append a
-// reach-out block at the end of every caption).
+// reach-out block at the end of every caption). Both phone and WhatsApp
+// are shown when filled — the user may legitimately have a separate
+// landline and mobile.
 function buildContactBlock(business) {
   if (!business) return null;
   const parts = [];
-  if (business.website) parts.push(`🌐 ${business.website}`);
-  // Dedupe phone vs WhatsApp when they're the same number — only show
-  // WhatsApp (it's actionable on tap). If they differ, show both.
-  const phone = business.phone || '';
-  const wa = business.whatsapp || '';
-  const sameNumber = phone && wa && normalizePhone(phone) === normalizePhone(wa);
-  if (wa) parts.push(`📲 WhatsApp ${wa}`);
-  if (phone && !sameNumber) parts.push(`📞 ${phone}`);
+  if (business.website)          parts.push(`🌐 ${business.website}`);
+  if (business.phone)            parts.push(`📞 ${business.phone}`);
+  if (business.whatsapp)         parts.push(`📲 WhatsApp ${business.whatsapp}`);
   if (business.instagram_handle) parts.push(`📷 @${String(business.instagram_handle).replace(/^@/, '')}`);
   return parts.length ? parts.join('  ·  ') : null;
-}
-
-function normalizePhone(s) {
-  return String(s || '').replace(/\D+/g, '');
 }
 
 /**
