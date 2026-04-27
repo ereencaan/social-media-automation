@@ -67,6 +67,27 @@ async function init() {
     db.run(`CREATE UNIQUE INDEX IF NOT EXISTS uq_orgs_intake_token ON orgs(intake_token) WHERE intake_token IS NOT NULL`);
   }
 
+  // P1 billing columns. plan_status mirrors Stripe subscription state so the
+  // app can show "past_due" banners without round-tripping to Stripe on every
+  // request. trial_ends_at is set at signup time even if the user hasn't
+  // attached a card yet — gives us a clean countdown banner to drive upgrades.
+  const billingOrgCols = [
+    ['plan',                 "TEXT NOT NULL DEFAULT 'free'"],
+    ['plan_status',          "TEXT NOT NULL DEFAULT 'active'"],   // active|trialing|past_due|canceled|incomplete
+    ['plan_interval',        'TEXT'],                              // monthly|yearly|null
+    ['trial_ends_at',        'TEXT'],
+    ['stripe_customer_id',   'TEXT'],
+    ['stripe_subscription_id', 'TEXT'],
+    ['plan_updated_at',      'TEXT'],
+  ];
+  for (const [name, type] of billingOrgCols) {
+    if (!existingOrgCols.has(name)) {
+      db.run(`ALTER TABLE orgs ADD COLUMN ${name} ${type}`);
+    }
+  }
+  db.run(`CREATE INDEX IF NOT EXISTS idx_orgs_stripe_customer ON orgs(stripe_customer_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_orgs_stripe_sub      ON orgs(stripe_subscription_id)`);
+
   db.run(`
     CREATE TABLE IF NOT EXISTS users (
       id            TEXT PRIMARY KEY,
@@ -91,6 +112,17 @@ async function init() {
     ['last_login_at',        'TEXT'],
     ['failed_login_count',   'INTEGER NOT NULL DEFAULT 0'],
     ['locked_until',         'TEXT'],           // ISO datetime while account is temp-locked
+    // Email verification (P1 anti-abuse). Null verified_at = not verified yet.
+    // Free-tier signups can browse the app but can't burn AI calls until they
+    // click the link, which kills the disposable-email-spray attack.
+    ['email_verified_at',    'TEXT'],
+    ['email_verify_token',   'TEXT'],
+    ['email_verify_expires_at', 'TEXT'],
+    // Password reset (P2). Same pattern: short-lived token + expiry.
+    ['password_reset_token',      'TEXT'],
+    ['password_reset_expires_at', 'TEXT'],
+    // Soft-delete: 30-day grace before purge so users can recover their org.
+    ['deleted_at',           'TEXT'],
   ];
   for (const [name, type] of wantedUserCols) {
     if (!existingUserCols.has(name)) {
@@ -304,6 +336,37 @@ async function init() {
     )
   `);
   db.run(`CREATE INDEX IF NOT EXISTS idx_brand_dates_org ON brand_special_dates(org_id)`);
+
+  // ---- Billing / usage counters --------------------------------------------
+  // One row per (org, period_month). Reset on the 1st of each month by a
+  // dedicated cron — see services/billing.service.js. We INSERT OR IGNORE
+  // on first hit and then UPDATE...+1, so the counters survive restarts and
+  // never produce a NULL row.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS usage_counters (
+      org_id            TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+      period_month      TEXT NOT NULL,             -- YYYY-MM (UTC)
+      posts_created     INTEGER NOT NULL DEFAULT 0,
+      ai_calls_count    INTEGER NOT NULL DEFAULT 0,
+      leads_count       INTEGER NOT NULL DEFAULT 0,
+      updated_at        TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (org_id, period_month)
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_usage_counters_period ON usage_counters(period_month)`);
+
+  // Stripe webhook event log for idempotency. Stripe retries delivery on any
+  // non-2xx, so we MUST dedupe on event.id or we'll double-credit/double-bill
+  // on every retry. Tiny table, indexed by primary key only.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS stripe_webhook_events (
+      id           TEXT PRIMARY KEY,             -- Stripe's evt_xxx
+      type         TEXT NOT NULL,
+      received_at  TEXT DEFAULT (datetime('now')),
+      processed_at TEXT,
+      error        TEXT
+    )
+  `);
 
   // ---- Per-org social platform credentials --------------------------------
   // Replaces the single-tenant .env-based tokens. Each customer runs OAuth

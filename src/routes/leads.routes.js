@@ -4,6 +4,8 @@ const svc = require('../services/leads.service');
 const intake = require('../services/intake.service');
 const { prepare } = require('../config/database');
 const { draftAndReview, draftEmail } = require('../services/lead-email.service');
+const { enforceQuota } = require('../middleware/billing');
+const usage = require('../services/usage.service');
 
 // All routes here assume requireAuth has already attached req.user.
 // Org scoping is derived from req.user.orgId — never from the request body.
@@ -44,9 +46,10 @@ router.get('/', (req, res) => {
   }
 });
 
-router.post('/', (req, res) => {
+router.post('/', enforceQuota('leads'), (req, res) => {
   try {
     const lead = svc.createLead(req.user.orgId, req.body);
+    usage.increment(req.user.orgId, 'leads');
     res.status(201).json(lead);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -86,7 +89,7 @@ router.get('/:id/activities', (req, res) => {
 // POST /api/leads/:id/emails/draft  — generate a draft + multi-model review.
 //     body: { goal?: 'intro'|'followup'|'meeting'|'reactivate'|'proposal'|'custom',
 //             extra?: string }
-router.post('/:id/emails/draft', async (req, res) => {
+router.post('/:id/emails/draft', enforceQuota('ai_calls'), async (req, res) => {
   try {
     const lead = svc.getLead(req.user.orgId, req.params.id);
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
@@ -94,6 +97,7 @@ router.post('/:id/emails/draft', async (req, res) => {
     const goal = (req.body && req.body.goal) || 'intro';
     const extra = (req.body && req.body.extra) || '';
     const result = await draftAndReview({ business: brand, lead, goal, extra });
+    usage.increment(req.user.orgId, 'ai_calls');
     res.json(result);
   } catch (err) {
     console.error('[LeadEmailDraft]', err);

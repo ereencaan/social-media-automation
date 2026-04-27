@@ -38,6 +38,7 @@
     "qrcode": "^1.5.4",
     "sharp": "^0.34.5",
     "sql.js": "^1.11.0",
+    "stripe": "^17.7.0",
     "uuid": "^11.0.5"
   },
   "devDependencies": {

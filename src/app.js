@@ -45,6 +45,10 @@ app.use('/api/auth', require('./routes/auth.routes'));
 app.use('/api/intake', require('./routes/intake.routes'));
 // Meta (Instagram + Facebook) webhooks — signature-verified, public.
 app.use('/webhooks', require('./routes/webhooks.routes'));
+// Stripe webhook — HMAC signature in stripe-signature header. Public.
+app.use('/webhooks/stripe', require('./routes/stripe-webhook.routes'));
+// Plans catalog is public so the /pricing page can render before signup.
+app.use('/api/public/billing', require('./routes/public-billing.routes'));
 
 // Protected routes
 // /storage contains user-uploaded media which may contain PII. Gate it on auth.
@@ -54,6 +58,7 @@ app.use('/api/brand', requireAuth, require('./routes/brand.routes'));
 app.use('/api/leads', requireAuth, require('./routes/leads.routes'));
 app.use('/api/plans', requireAuth, require('./routes/plans.routes'));
 app.use('/api/connect', requireAuth, require('./routes/connect.routes'));
+app.use('/api/billing', requireAuth, require('./routes/billing.routes'));
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -67,6 +72,9 @@ async function start() {
     console.log(`Server running at http://localhost:${PORT}`);
     const { loadPendingSchedules } = require('./services/scheduler.service');
     loadPendingSchedules();
+    // Eager-load billing.service so its cron registers at boot, not only
+    // on the first request that hits a billing route.
+    require('./services/billing.service');
   });
 }
 

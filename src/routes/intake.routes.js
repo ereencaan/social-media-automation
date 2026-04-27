@@ -34,6 +34,12 @@ router.post('/:token', intakeLimiter, (req, res) => {
     const org = intake.getOrgByToken(req.params.token);
     if (!org) return res.status(404).json({ error: 'Invalid intake token' });
     const lead = intake.ingest(org.id, req.body || {});
+    // Count toward the monthly leads quota but do NOT block — webhook senders
+    // (Zapier, custom forms) usually don't retry on 402, and silently dropping
+    // a customer's lead is the worst possible failure mode here. The UI shows
+    // a "you're over quota" banner so the owner upgrades; we just keep
+    // ingesting in the meantime.
+    try { require('../services/usage.service').increment(org.id, 'leads'); } catch (_) {}
     res.status(201).json({ ok: true, leadId: lead.id });
   } catch (err) {
     const status = err.status || 400;

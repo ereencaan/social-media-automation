@@ -17,6 +17,8 @@ const { prepare } = require('../config/database');
 const { generateId } = require('../utils/helpers');
 const { planMonth } = require('../services/content-planner.service');
 const { generatePlanItemNow, publishPlanItemNow } = require('../services/scheduler.service');
+const { enforceQuota } = require('../middleware/billing');
+const usage = require('../services/usage.service');
 
 function getOwnedPlan(id, orgId) {
   return prepare('SELECT * FROM content_plans WHERE id = ? AND org_id = ?').get(id, orgId);
@@ -39,7 +41,10 @@ function presentItem(it) {
 }
 
 // ---- POST /api/plans/preview ---------------------------------------------
-router.post('/preview', async (req, res) => {
+// Counts as one ai_call (Claude generates the month brief). The actual
+// per-item generation later goes through generate-now / cron, which each
+// hit /generate or generate-template — those are quota-gated independently.
+router.post('/preview', enforceQuota('ai_calls'), async (req, res) => {
   try {
     const {
       month, targetCount, mode = 'hybrid',
@@ -67,6 +72,7 @@ router.post('/preview', async (req, res) => {
       month, targetCount, mode,
       platformMix, constraints, customDays, country,
     });
+    usage.increment(req.user.orgId, 'ai_calls');
     res.json(result);
   } catch (err) {
     console.error('[PlanPreview]', err);

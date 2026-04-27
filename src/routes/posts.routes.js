@@ -14,9 +14,12 @@ const { listTemplates, renderTemplate, renderVideo } = require('../services/temp
 const { generateVideo, generateVideoFromImage } = require('../services/runway.service');
 const { applyImageOverlay, applyVideoOverlay } = require('../services/overlay.service');
 const { schedulePost, cancelSchedule, publishPost } = require('../services/scheduler.service');
+const { enforceQuota, requirePlan } = require('../middleware/billing');
+const usage = require('../services/usage.service');
 
 // Generate content with AI (DALL-E + Claude)
-router.post('/generate', async (req, res) => {
+// Quota: counts as 1 post + 1 ai_call. Both must be under the plan limit.
+router.post('/generate', enforceQuota('posts'), enforceQuota('ai_calls'), async (req, res) => {
   try {
     const { prompt, platforms = ['instagram'], onBrand = true, variants = 1, qualityGate = true } = req.body;
     if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
@@ -25,6 +28,10 @@ router.post('/generate', async (req, res) => {
       orgId: req.user.orgId, userId: req.user.id,
       prompt, platforms, onBrand, variants, qualityGate,
     });
+
+    // Increment AFTER success — failed generations don't burn quota.
+    usage.increment(req.user.orgId, 'posts');
+    usage.increment(req.user.orgId, 'ai_calls');
 
     res.json({
       id, prompt,
@@ -43,7 +50,12 @@ router.post('/generate', async (req, res) => {
 });
 
 // Generate video/reel with AI (Runway + Claude)
-router.post('/generate-video', async (req, res) => {
+// Pro+ only — video generation is bundled into the higher tiers.
+router.post('/generate-video',
+  requirePlan('pro'),
+  enforceQuota('posts'),
+  enforceQuota('ai_calls'),
+  async (req, res) => {
   try {
     const { prompt, platforms = ['instagram'], duration = 5, onBrand = true, variants = 1, qualityGate = true } = req.body;
     if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
@@ -84,6 +96,9 @@ router.post('/generate-video', async (req, res) => {
       quality ? JSON.stringify(quality) : null,
     );
 
+    usage.increment(req.user.orgId, 'posts');
+    usage.increment(req.user.orgId, 'ai_calls');
+
     res.json({
       id,
       prompt,
@@ -103,7 +118,7 @@ router.post('/generate-video', async (req, res) => {
 });
 
 // Generate from Templated.io template
-router.post('/generate-template', async (req, res) => {
+router.post('/generate-template', enforceQuota('posts'), enforceQuota('ai_calls'), async (req, res) => {
   try {
     const { prompt, templateId, layers = {}, platforms = ['instagram'], format = 'jpg', onBrand = true } = req.body;
     if (!templateId) return res.status(400).json({ error: 'templateId is required' });
@@ -147,6 +162,9 @@ router.post('/generate-template', async (req, res) => {
       JSON.stringify(platforms)
     );
 
+    usage.increment(req.user.orgId, 'posts');
+    usage.increment(req.user.orgId, 'ai_calls');
+
     res.json({
       id,
       prompt,
@@ -176,7 +194,7 @@ router.get('/templates', async (req, res) => {
 });
 
 // ---- Prompt pre-analysis (fast, single-model Claude by default) ---------
-router.post('/analyze-prompt', async (req, res) => {
+router.post('/analyze-prompt', enforceQuota('ai_calls'), async (req, res) => {
   try {
     const { prompt, platforms = ['instagram'], models } = req.body || {};
     if (!prompt || !String(prompt).trim()) {
@@ -184,6 +202,7 @@ router.post('/analyze-prompt', async (req, res) => {
     }
     const brand = prepare('SELECT * FROM brand_settings WHERE org_id = ?').get(req.user.orgId);
     const result = await analyzePrompt({ prompt, business: brand, platforms, models });
+    usage.increment(req.user.orgId, 'ai_calls');
     res.json(result);
   } catch (err) {
     console.error('[AnalyzePrompt]', err);
@@ -192,7 +211,7 @@ router.post('/analyze-prompt', async (req, res) => {
 });
 
 // ---- Rewrite a prompt using suggestions + business profile -------------
-router.post('/rewrite-prompt', async (req, res) => {
+router.post('/rewrite-prompt', enforceQuota('ai_calls'), async (req, res) => {
   try {
     const { prompt, platforms = ['instagram'], suggestions = [] } = req.body || {};
     if (!prompt || !String(prompt).trim()) {
@@ -200,6 +219,7 @@ router.post('/rewrite-prompt', async (req, res) => {
     }
     const brand = prepare('SELECT * FROM brand_settings WHERE org_id = ?').get(req.user.orgId);
     const rewritten = await rewritePrompt({ prompt, business: brand, platforms, suggestions });
+    usage.increment(req.user.orgId, 'ai_calls');
     res.json({ prompt: rewritten });
   } catch (err) {
     console.error('[RewritePrompt]', err);
@@ -210,7 +230,7 @@ router.post('/rewrite-prompt', async (req, res) => {
 // ---- Regenerate copy for an existing post, applying quality suggestions --
 // Replaces caption/hashtags/platformCaptions in-place. Image is NOT
 // regenerated (that's a separate, expensive call the user can trigger).
-router.post('/:id/regenerate-copy', async (req, res) => {
+router.post('/:id/regenerate-copy', enforceQuota('ai_calls'), async (req, res) => {
   try {
     const post = getOwnedPost(req.params.id, req.user.orgId);
     if (!post) return res.status(404).json({ error: 'Post not found' });
@@ -298,6 +318,7 @@ router.post('/:id/regenerate-copy', async (req, res) => {
       req.params.id, req.user.orgId,
     );
 
+    usage.increment(req.user.orgId, 'ai_calls');
     res.json(presentPost(getOwnedPost(req.params.id, req.user.orgId)));
   } catch (err) {
     console.error('[RegenerateCopy]', err);
