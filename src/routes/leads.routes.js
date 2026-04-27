@@ -17,7 +17,7 @@ const usage = require('../services/usage.service');
 router.get('/intake/token', (req, res) => {
   try {
     const token = intake.getOrCreateToken(req.user.orgId);
-    res.json({ token, url: buildIntakeUrl(req, token) });
+    res.json(buildIntakeUrls(req, token));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -26,15 +26,27 @@ router.get('/intake/token', (req, res) => {
 router.post('/intake/token/rotate', (req, res) => {
   try {
     const token = intake.regenerateToken(req.user.orgId);
-    res.json({ token, url: buildIntakeUrl(req, token) });
+    res.json(buildIntakeUrls(req, token));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
 
-function buildIntakeUrl(req, token) {
-  const base = process.env.APP_BASE_URL || `${req.protocol}://${req.get('host')}`;
-  return `${base.replace(/\/$/, '')}/api/intake/${token}`;
+// Single token, multiple intake surfaces. The frontend Settings page
+// renders one card per surface so the user can copy whichever URL or
+// address they need without ever seeing a different token. Rotating
+// the token invalidates all three at once — the rotate-confirm dialog
+// warns about that.
+function buildIntakeUrls(req, token) {
+  const base = (process.env.APP_BASE_URL || `${req.protocol}://${req.get('host')}`)
+    .replace(/\/$/, '');
+  const emailDomain = (process.env.EMAIL_INBOUND_DOMAIN || '').trim();
+  return {
+    token,
+    url:          `${base}/api/intake/${token}`,
+    tawkUrl:      `${base}/api/intake/tawk/${token}`,
+    emailAddress: emailDomain ? `${token}@${emailDomain}` : null,
+  };
 }
 
 router.get('/', (req, res) => {

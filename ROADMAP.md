@@ -122,7 +122,7 @@
 - [x] `tawk` source chip (uses canonical `tawk` id, see SOURCE_META)
 - [x] Anonymous-visitor filter (skip Tawk auto-names like "Visitor 1234567890")
 - [x] Hitratech.co.uk: Tidio swapped for Tawk (dogfood)
-- [ ] Settings → "Connect Tawk in 5 minutes" guide card with intake URL
+- [x] Settings → "Connect Tawk in 5 minutes" reveal card (URL + copy + 6-step guide)
 - [ ] Per-org webhook secret (replace single env var when multi-tenant lands)
 
 ### Live chat — Tidio
@@ -160,8 +160,8 @@
 - [x] `POST /api/intake/email` route — multer multipart parsing, recipient-domain check (`EMAIL_INBOUND_DOMAIN`), optional shared secret (`EMAIL_INBOUND_SECRET`), always-200 to drop provider retries on bad input
 - [x] `intake.service.ingestEmail()` — creates lead with email-source activity, reuses existing `(source, source_ref)` dedupe
 - [x] Per-org forwarding address: `{intake_token}@leads.hitrapost.co.uk`
-- [ ] **User: SendGrid Inbound Parse setup** — receiving domain `leads.hitrapost.co.uk`, destination URL `https://hitrapost.co.uk/api/intake/email`, MX record on Cloudflare, set `EMAIL_INBOUND_SECRET` on prod
-- [ ] Settings → "Email-to-Lead Address" reveal card + Tidio/Gmail forward setup guide
+- [x] SendGrid Inbound Parse setup live — `leads.hitrapost.co.uk` MX → mx.sendgrid.net, `EMAIL_INBOUND_SECRET` enforced via `?key=...` URL query, end-to-end test from Gmail produced a real lead
+- [x] Settings → "Email-to-Lead Address" reveal card + Tidio/Gmail/WP forward setup guide (per-source chip mapping documented inline)
 - [ ] CF7 / WPForms body-parser (extract name+email from "Name: X / Email: Y" patterns instead of using sender display name)
 
 ### Meta App Review (UNBLOCKS real IG/FB DM ingest)

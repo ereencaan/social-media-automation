@@ -2775,39 +2775,81 @@ VIEWS.settings = async function settingsView(root, myGen) {
   ));
   root.appendChild(card);
 
-  // ---- Intake webhook card ----
+  // ---- Lead capture cards (three surfaces, one shared token) ----
+  //
+  // The same per-org intake_token powers three different inbound channels.
+  // We surface each as its own card so the user can scan to the integration
+  // they want and copy the right URL/address without seeing the raw token.
+  // A single rotate button lives on the generic intake card (the "primary"
+  // surface) and warns that all three URLs will stop working at once.
+
+  // Reusable reveal+copy row, used by all three cards below.
+  function intakeRevealRow(labelText, value, copyToast) {
+    return el('div', { class: 'intake-url-row' },
+      el('label', { style: 'font-size:12px; color:var(--text-dim); font-weight:500' }, labelText),
+      el('div', { class: 'intake-url-field' },
+        el('code', { class: 'intake-url' }, value),
+        el('button', {
+          class: 'btn btn-sm', title: 'Copy',
+          onclick: () => {
+            navigator.clipboard.writeText(value).then(() => toast(copyToast || 'Copied', 'success'));
+          },
+        }, 'Copy'),
+      ),
+    );
+  }
+
+  // Card 1: Generic intake webhook (Typeform / Zapier / forms).
   const intakeCard = el('div', { class: 'card', style: 'margin-top:20px' });
   intakeCard.appendChild(el('div', { class: 'section-header' },
-    el('h2', {}, 'Intake webhook'),
+    el('h2', {}, 'Generic intake webhook'),
     el('div', { class: 'section-sub' },
-      'POST leads from Typeform, Zapier, website forms, or any tool. Every submission becomes a new lead in your CRM.'),
+      'POST leads from Typeform, Zapier, website forms, or any tool that can hit a URL. Every submission becomes a new lead.'),
   ));
   const intakeBody = el('div');
   intakeCard.appendChild(intakeBody);
   root.appendChild(intakeCard);
 
+  // Card 2: Tawk.to live chat.
+  const tawkCard = el('div', { class: 'card', style: 'margin-top:20px' });
+  tawkCard.appendChild(el('div', { class: 'section-header' },
+    el('h2', {}, 'Tawk.to live chat'),
+    el('div', { class: 'section-sub' },
+      'Free live-chat with webhook on the free tier. Paste the URL below in Tawk dashboard → Administration → Webhooks.'),
+  ));
+  const tawkBody = el('div');
+  tawkCard.appendChild(tawkBody);
+  root.appendChild(tawkCard);
+
+  // Card 3: Email-to-Lead.
+  const emailCard = el('div', { class: 'card', style: 'margin-top:20px' });
+  emailCard.appendChild(el('div', { class: 'section-header' },
+    el('h2', {}, 'Email-to-Lead'),
+    el('div', { class: 'section-sub' },
+      'Forward any inbound email — direct customer mails, Tidio/Crisp/Tawk notifications, WP form alerts — to this address and it lands as a lead.'),
+  ));
+  const emailBody = el('div');
+  emailCard.appendChild(emailBody);
+  root.appendChild(emailCard);
+
   async function loadIntake() {
     intakeBody.innerHTML = '<div class="loading"></div>';
+    tawkBody.innerHTML = '<div class="loading"></div>';
+    emailBody.innerHTML = '<div class="loading"></div>';
     let info;
     try { info = await api('/api/leads/intake/token'); }
-    catch (e) { intakeBody.innerHTML = `<div class="auth-error show">${e.message}</div>`; return; }
+    catch (e) {
+      const msg = `<div class="auth-error show">${e.message}</div>`;
+      intakeBody.innerHTML = msg; tawkBody.innerHTML = ''; emailBody.innerHTML = '';
+      return;
+    }
     if (stale(myGen)) return;
 
+    // ---- Card 1: Generic intake webhook ----
     const curlEx = `curl -X POST ${info.url} \\\n  -H "Content-Type: application/json" \\\n  -d '{"name":"Jane Doe","email":"jane@example.com","message":"Interested in a demo"}'`;
 
     intakeBody.innerHTML = '';
-    intakeBody.appendChild(el('div', { class: 'intake-url-row' },
-      el('label', { style: 'font-size:12px; color:var(--text-dim); font-weight:500' }, 'Your intake URL'),
-      el('div', { class: 'intake-url-field' },
-        el('code', { class: 'intake-url' }, info.url),
-        el('button', {
-          class: 'btn btn-sm', title: 'Copy',
-          onclick: () => {
-            navigator.clipboard.writeText(info.url).then(() => toast('Copied', 'success'));
-          },
-        }, 'Copy'),
-      ),
-    ));
+    intakeBody.appendChild(intakeRevealRow('Your intake URL', info.url, 'Intake URL copied'));
 
     intakeBody.appendChild(el('details', { class: 'intake-details', style: 'margin-top:14px' },
       el('summary', {}, 'cURL example'),
@@ -2831,7 +2873,7 @@ VIEWS.settings = async function settingsView(root, myGen) {
       el('button', {
         class: 'btn btn-danger btn-sm',
         onclick: async () => {
-          if (!confirm('Rotate your intake token? The old URL will stop working immediately.')) return;
+          if (!confirm('Rotate your intake token?\n\nThis will invalidate ALL three URLs at once: generic intake, Tawk webhook, and your email-to-lead address. You will need to re-paste the new URLs into Tawk, Zapier, etc.')) return;
           try {
             await api('/api/leads/intake/token/rotate', { method: 'POST' });
             toast('Token rotated', 'success');
@@ -2840,6 +2882,57 @@ VIEWS.settings = async function settingsView(root, myGen) {
         },
       }, 'Rotate token'),
     ));
+
+    // ---- Card 2: Tawk.to webhook URL ----
+    tawkBody.innerHTML = '';
+    tawkBody.appendChild(intakeRevealRow('Tawk webhook URL', info.tawkUrl, 'Tawk URL copied'));
+
+    tawkBody.appendChild(el('details', { class: 'intake-details', style: 'margin-top:14px' },
+      el('summary', {}, 'Connect Tawk in 5 minutes'),
+      el('div', { style: 'font-size:13px; color:var(--text-dim); padding:8px 4px; line-height:1.8' },
+        el('div', {}, '1. Tawk.to dashboard → ⚙ Administration'),
+        el('div', {}, '2. Channels → Chat Widget → install on your site'),
+        el('div', {}, '3. Administration → Webhooks → + Add Webhook'),
+        el('div', {}, '4. Paste the URL above as Endpoint URL'),
+        el('div', {}, '5. Tick events: Chat Start, Chat Transcript, New Ticket'),
+        el('div', {}, '6. Save → copy Tawk\'s Secret Key → set TAWK_WEBHOOK_SECRET on your server'),
+        el('div', { style: 'margin-top:6px; color:var(--text-mute); font-size:12px' },
+          'Anonymous chats (no name/email/phone) are silently dropped so the kanban stays clean.'),
+      ),
+    ));
+
+    // ---- Card 3: Email-to-Lead address ----
+    emailBody.innerHTML = '';
+    if (!info.emailAddress) {
+      // Operator hasn't set EMAIL_INBOUND_DOMAIN — surface the gap rather
+      // than render a half-broken address.
+      emailBody.appendChild(el('div', {
+        style: 'padding:14px; background:var(--surface-2); border:1px dashed var(--border-soft); border-radius:8px; color:var(--text-dim); font-size:13px; line-height:1.6',
+      },
+        el('strong', { style: 'color:var(--text)' }, 'Email-to-Lead is not configured on this server.'),
+        el('div', { style: 'margin-top:6px' },
+          'Set EMAIL_INBOUND_DOMAIN in the server .env (e.g. leads.hitrapost.co.uk), point an MX record at your inbound provider (SendGrid Inbound Parse / Mailgun Routes), and restart.'),
+      ));
+    } else {
+      emailBody.appendChild(intakeRevealRow('Your forwarding address', info.emailAddress, 'Address copied'));
+
+      emailBody.appendChild(el('details', { class: 'intake-details', style: 'margin-top:14px', open: false },
+        el('summary', {}, 'How to use it'),
+        el('div', { style: 'font-size:13px; color:var(--text-dim); padding:8px 4px; line-height:1.8' },
+          el('div', { style: 'margin-bottom:6px' },
+            el('strong', { style: 'color:var(--text)' }, 'Direct customer mail: '),
+            'in Gmail/Outlook, set a forwarding rule on your business inbox (e.g. info@yourdomain.com) → forward all to the address above.'),
+          el('div', { style: 'margin-bottom:6px' },
+            el('strong', { style: 'color:var(--text)' }, 'Tidio (free tier): '),
+            'Tidio sends a "new conversation" email — forward that notification email to the address above. Lands as Tidio chat lead.'),
+          el('div', { style: 'margin-bottom:6px' },
+            el('strong', { style: 'color:var(--text)' }, 'WordPress forms: '),
+            'CF7 / WPForms / Elementor / Gravity / Ninja all email the site owner. Forward those to the address above for an auto-tagged WordPress chip.'),
+          el('div', { style: 'margin-top:8px; color:var(--text-mute); font-size:12px' },
+            'Sender domain decides the chip: Tidio / Tawk / Crisp / Smartsupp / LiveChat / WordPress. Generic mail gets the Email chip.'),
+        ),
+      ));
+    }
   }
   loadIntake();
 
