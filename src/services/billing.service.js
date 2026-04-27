@@ -107,6 +107,39 @@ cron.schedule('5 0 1 * *', () => {
   }
 });
 
+// ---- Cron: hard-delete soft-deleted accounts past their grace window ------
+// Daily at 03:30 UTC. Picks up rows whose delete_purge_at has arrived and
+// drops the user. ON DELETE CASCADE on every FK to users.id / orgs.id
+// handles the rest (posts, leads, social_credentials, brand_settings, ...).
+//
+// We delete the org IFF the user being purged is its only owner. Multi-seat
+// (Agency tier) eventually means an org could outlive any single user; for
+// now there's exactly one user per org so deleting both is correct.
+cron.schedule('30 3 * * *', () => {
+  try {
+    const due = prepare(`
+      SELECT id, org_id FROM users
+      WHERE delete_purge_at IS NOT NULL
+        AND delete_purge_at <= datetime('now')
+    `).all();
+
+    for (const u of due) {
+      // Cascade: deleting the org removes the user via FK ON DELETE CASCADE.
+      // We delete the org first because that hits all the org-scoped tables
+      // in one go, then any user rows still pointing at us go with the user.
+      try {
+        prepare('DELETE FROM orgs  WHERE id = ?').run(u.org_id);
+        prepare('DELETE FROM users WHERE id = ?').run(u.id);
+        console.log(`[Billing] hard-purged user ${u.id} (org ${u.org_id})`);
+      } catch (innerErr) {
+        console.error(`[Billing] purge failed for user ${u.id}:`, innerErr.message);
+      }
+    }
+  } catch (err) {
+    console.error('[Billing] purge cron failed', err);
+  }
+});
+
 module.exports = {
   getOrgBilling,
   applySubscriptionToOrg,

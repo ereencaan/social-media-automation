@@ -1,9 +1,25 @@
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const router = express.Router();
-const { register, login, verifyEmailToken, resendVerificationEmail } = require('../services/auth.service');
+const authSvc = require('../services/auth.service');
+const { register, login, verifyEmailToken, resendVerificationEmail,
+        requestPasswordReset, resetPassword, changePassword,
+        requestEmailChange, confirmEmailChange,
+        deleteAccount } = authSvc;
 const { requireAuth } = require('../middleware/auth');
 const { loginLimiter, registerLimiter, twoFaLimiter, dailySignupLimiter } = require('../middleware/rate-limit');
 const totp = require('../services/totp.service');
+
+// Tight limit on the password-reset request endpoint — it's a public form
+// that emails an arbitrary address, perfect for spamming. 5 / hour / IP is
+// plenty for legit users who fat-fingered the form.
+const passwordResetRequestLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many reset requests. Try again later.' },
+});
 
 // Regenerate session to prevent fixation, then set userId.
 function startSession(req, res, user, status) {
@@ -142,6 +158,77 @@ router.post('/2fa/disable', requireAuth, async (req, res) => {
   try {
     const code = String(req.body?.code || '').trim();
     const out = await totp.disable2FA(req.user.id, code);
+    res.json(out);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---- Password reset (public) --------------------------------------------
+router.post('/password/request-reset', passwordResetRequestLimiter, async (req, res) => {
+  try {
+    await requestPasswordReset(req.body?.email);
+    // Always 200 — see service comment about user enumeration.
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/password/reset', async (req, res) => {
+  try {
+    const token       = String(req.body?.token || '');
+    const newPassword = String(req.body?.password || '');
+    await resetPassword(token, newPassword);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---- Password change (authed) -------------------------------------------
+router.post('/password/change', requireAuth, async (req, res) => {
+  try {
+    const cur = String(req.body?.currentPassword || '');
+    const nxt = String(req.body?.newPassword || '');
+    await changePassword(req.user.id, cur, nxt);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---- Email change ------------------------------------------------------
+router.post('/email/change-request', requireAuth, async (req, res) => {
+  try {
+    const out = await requestEmailChange(
+      req.user.id,
+      String(req.body?.currentPassword || ''),
+      String(req.body?.newEmail || ''),
+    );
+    res.json(out);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Public confirmation link (clicked from the inbox).
+router.get('/email/change-confirm', (req, res) => {
+  const token = String(req.query?.token || '').trim();
+  if (!token) return res.status(400).send('Missing token');
+  const ok = confirmEmailChange(token);
+  if (!ok) return res.status(400).send('This link is invalid or expired. Sign in and request a new one.');
+  res.redirect('/?email_changed=1');
+});
+
+// ---- Account deletion --------------------------------------------------
+// Soft-delete with a 30-day grace window. Logs the user out immediately;
+// they can email support to restore within the grace period.
+router.post('/account/delete', requireAuth, async (req, res) => {
+  try {
+    const out = await deleteAccount(req.user.id, String(req.body?.currentPassword || ''));
+    req.session.destroy(() => {});
+    res.clearCookie('connect.sid');
     res.json(out);
   } catch (err) {
     res.status(400).json({ error: err.message });

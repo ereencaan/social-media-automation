@@ -121,8 +121,14 @@ async function init() {
     // Password reset (P2). Same pattern: short-lived token + expiry.
     ['password_reset_token',      'TEXT'],
     ['password_reset_expires_at', 'TEXT'],
+    // Email change (P2). new_email is what we'll switch to once the user
+    // clicks the confirmation link sent to that address.
+    ['email_change_new',          'TEXT'],
+    ['email_change_token',        'TEXT'],
+    ['email_change_expires_at',   'TEXT'],
     // Soft-delete: 30-day grace before purge so users can recover their org.
     ['deleted_at',           'TEXT'],
+    ['delete_purge_at',      'TEXT'],   // ISO datetime when hard-delete fires
   ];
   for (const [name, type] of wantedUserCols) {
     if (!existingUserCols.has(name)) {

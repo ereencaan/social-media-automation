@@ -165,7 +165,7 @@ function renderAuthScreen() {
     errBox.classList.remove('show');
     const fd = new FormData(e.target);
     try {
-      const user = await api('/api/auth/login', {
+      const out = await api('/api/auth/login', {
         method: 'POST',
         body: {
           email: String(fd.get('email') || '').trim(),
@@ -174,13 +174,33 @@ function renderAuthScreen() {
           password: String(fd.get('password') || '').trim(),
         },
       });
-      State.user = user;
+      // Two-phase login when 2FA is enabled. The first /login response is
+      // { step: '2fa' }, NOT a user record — open the challenge form and
+      // let it call /login/2fa with the code.
+      if (out && out.step === '2fa') {
+        showTwoFactorChallenge();
+        return;
+      }
+      State.user = out;
       await bootApp();
     } catch (err) {
       errBox.textContent = err.message;
       errBox.classList.add('show');
     }
   };
+
+  // "Forgot password?" — toggles a tiny form below the login form.
+  wireForgotPasswordLink();
+
+  // Handle ?reset_token=... arriving from the password-reset email.
+  if (location.search.includes('reset_token=')) {
+    const t = new URLSearchParams(location.search).get('reset_token');
+    if (t) showPasswordResetForm(t);
+  }
+  if (location.search.includes('email_changed=1')) {
+    toast('Email updated. Please sign in again with your new email.', 'success', 6000);
+    history.replaceState(null, '', location.pathname + location.hash);
+  }
 
   // Register
   $('#register-form').onsubmit = async (e) => {
@@ -2721,6 +2741,9 @@ VIEWS.settings = async function settingsView(root, myGen) {
   // ---- Billing card (top of Settings — most-asked question) ----
   renderBillingCard(root, myGen);
 
+  // ---- Security card (password, 2FA, email, deletion) ----
+  renderSecurityCard(root, myGen);
+
   // ---- Account card ----
   const card = el('div', { class: 'card', style: 'margin-top:20px' });
   card.appendChild(el('div', { class: 'section-header' },
@@ -3316,6 +3339,508 @@ function renderUsageBar(metric, used, limit) {
     unlimited ? null : el('div', { class: 'usage-bar-track' },
       el('div', { class: cls, style: `width:${pct}%` })),
   );
+}
+
+// =======================================================================
+//   P2 — Auth UI (2FA challenge + enrollment, password reset, email change,
+//                 account deletion)
+// =======================================================================
+
+// ---- Login: 2FA challenge form ------------------------------------------
+// Replaces the login form on the auth screen with a 6-digit code prompt.
+// Backend returns { step: '2fa' } on first login if TOTP is on; the second
+// call goes to /login/2fa with the code (or a backup code).
+function showTwoFactorChallenge() {
+  const wrap = $('.auth-card');
+  if (!wrap) return;
+
+  // Hide login + register forms and the tab strip — there's only one path
+  // forward at this point.
+  $$('.auth-tabs .tab').forEach(t => t.classList.add('hidden'));
+  $('#login-form').classList.add('hidden');
+  $('#register-form').classList.add('hidden');
+
+  const existing = $('#twofa-form');
+  if (existing) { existing.classList.remove('hidden'); existing.querySelector('input').focus(); return; }
+
+  const form = el('form', { id: 'twofa-form', class: 'auth-form' },
+    el('div', { class: 'auth-form-lede', style: 'font-size:13px; color:var(--text-dim); line-height:1.5; margin-bottom:6px' },
+      'Enter the 6-digit code from your authenticator app, or one of your backup codes.'),
+    el('label', {}, 'Code',
+      el('input', {
+        type: 'text', name: 'code', required: true,
+        autocomplete: 'one-time-code', inputmode: 'numeric',
+        placeholder: '123456 or backup code',
+      }),
+    ),
+    el('button', { type: 'submit', class: 'btn btn-primary btn-block' }, 'Verify'),
+    el('div', { class: 'auth-error', id: 'twofa-error' }),
+    el('div', { style: 'text-align:center; margin-top:14px' },
+      el('a', {
+        href: '#',
+        style: 'color:var(--text-dim); font-size:12px',
+        onclick: (ev) => { ev.preventDefault(); cancelTwoFactorChallenge(); },
+      }, '← Back to login'),
+    ),
+  );
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const err = $('#twofa-error');
+    err.classList.remove('show');
+    const code = String(new FormData(e.target).get('code') || '').trim();
+    try {
+      const user = await api('/api/auth/login/2fa', { method: 'POST', body: { code } });
+      State.user = user;
+      await bootApp();
+    } catch (ex) {
+      err.textContent = ex.message;
+      err.classList.add('show');
+    }
+  };
+  wrap.appendChild(form);
+  setTimeout(() => form.querySelector('input').focus(), 0);
+}
+
+function cancelTwoFactorChallenge() {
+  // POST a logout to clear the pending2fa side of the session, then put the
+  // login form back. Best-effort — failure here just falls back to the next
+  // login attempt clearing the pending state.
+  api('/api/auth/logout', { method: 'POST' }).catch(() => {});
+  $$('.auth-tabs .tab').forEach(t => t.classList.remove('hidden'));
+  $('#login-form').classList.remove('hidden');
+  $('#twofa-form')?.remove();
+}
+
+// ---- "Forgot password?" link + request form -----------------------------
+function wireForgotPasswordLink() {
+  // Inject once below the password field.
+  if ($('#forgot-link')) return;
+  const loginForm = $('#login-form');
+  if (!loginForm) return;
+  const link = el('a', {
+    id: 'forgot-link',
+    href: '#',
+    class: 'forgot-link',
+    onclick: (ev) => { ev.preventDefault(); showForgotPasswordForm(); },
+  }, 'Forgot your password?');
+  // Insert before the submit button.
+  const submit = loginForm.querySelector('button[type="submit"]');
+  if (submit) loginForm.insertBefore(link, submit);
+}
+
+function showForgotPasswordForm() {
+  const wrap = $('.auth-card');
+  if (!wrap) return;
+  $$('.auth-tabs .tab').forEach(t => t.classList.add('hidden'));
+  $('#login-form').classList.add('hidden');
+  $('#register-form').classList.add('hidden');
+  $('#forgot-form')?.remove();
+  const form = el('form', { id: 'forgot-form', class: 'auth-form' },
+    el('div', { class: 'auth-form-lede', style: 'font-size:13px; color:var(--text-dim); line-height:1.5; margin-bottom:6px' },
+      "Enter your account email. If it matches an account we'll send a reset link."),
+    el('label', {}, 'Email',
+      el('input', { type: 'email', name: 'email', required: true, placeholder: 'you@company.com', autocomplete: 'email' }),
+    ),
+    el('button', { type: 'submit', class: 'btn btn-primary btn-block' }, 'Send reset link'),
+    el('div', { class: 'auth-error', id: 'forgot-error' }),
+    el('div', { style: 'text-align:center; margin-top:14px' },
+      el('a', {
+        href: '#', style: 'color:var(--text-dim); font-size:12px',
+        onclick: (ev) => { ev.preventDefault(); restoreLoginForm(); },
+      }, '← Back to login'),
+    ),
+  );
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const err = $('#forgot-error');
+    err.classList.remove('show');
+    const email = String(new FormData(e.target).get('email') || '').trim();
+    try {
+      await api('/api/auth/password/request-reset', { method: 'POST', body: { email } });
+      form.innerHTML = '';
+      form.appendChild(el('div', { class: 'auth-form-lede', style: 'color:var(--text); line-height:1.6' },
+        "If that email matches an account, we've sent a reset link. Check your inbox (and spam) — the link expires in 60 minutes."));
+      form.appendChild(el('div', { style: 'text-align:center; margin-top:14px' },
+        el('a', {
+          href: '#', style: 'color:var(--text-dim); font-size:12px',
+          onclick: (ev) => { ev.preventDefault(); restoreLoginForm(); },
+        }, '← Back to login'),
+      ));
+    } catch (ex) {
+      err.textContent = ex.message;
+      err.classList.add('show');
+    }
+  };
+  wrap.appendChild(form);
+}
+
+function showPasswordResetForm(token) {
+  // Show the auth screen even if we'd normally be on the dashboard.
+  renderAuthScreen();
+  const wrap = $('.auth-card');
+  if (!wrap) return;
+  $$('.auth-tabs .tab').forEach(t => t.classList.add('hidden'));
+  $('#login-form').classList.add('hidden');
+  $('#register-form').classList.add('hidden');
+  $('#reset-form')?.remove();
+
+  const form = el('form', { id: 'reset-form', class: 'auth-form' },
+    el('div', { class: 'auth-form-lede', style: 'font-size:13px; color:var(--text-dim); margin-bottom:6px' },
+      'Pick a new password. At least 8 characters.'),
+    el('label', {}, 'New password',
+      el('input', { type: 'password', name: 'password', required: true, minlength: 8,
+        placeholder: 'New password', autocomplete: 'new-password' }),
+    ),
+    el('button', { type: 'submit', class: 'btn btn-primary btn-block' }, 'Reset password'),
+    el('div', { class: 'auth-error', id: 'reset-error' }),
+  );
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const err = $('#reset-error');
+    err.classList.remove('show');
+    const password = String(new FormData(e.target).get('password') || '');
+    try {
+      await api('/api/auth/password/reset', { method: 'POST', body: { token, password } });
+      toast('Password updated. Please sign in.', 'success');
+      history.replaceState(null, '', location.pathname);
+      restoreLoginForm();
+    } catch (ex) {
+      err.textContent = ex.message;
+      err.classList.add('show');
+    }
+  };
+  wrap.appendChild(form);
+}
+
+function restoreLoginForm() {
+  $$('.auth-tabs .tab').forEach(t => t.classList.remove('hidden'));
+  $('#forgot-form')?.remove();
+  $('#reset-form')?.remove();
+  $('#twofa-form')?.remove();
+  $('#login-form').classList.remove('hidden');
+  $('#register-form').classList.add('hidden');
+  // Make sure the login tab is selected.
+  const loginTab = $$('.auth-tabs .tab').find(t => t.dataset.tab === 'login');
+  if (loginTab) {
+    $$('.auth-tabs .tab').forEach(b => b.classList.toggle('active', b === loginTab));
+  }
+}
+
+// ---- Settings → Security card -------------------------------------------
+// Mounted from VIEWS.settings (see renderSecurityCard call). Covers:
+//   * Change password (authed)
+//   * 2FA enrollment (QR modal → activate → backup codes screen)
+//   * Disable 2FA (with current code)
+//   * Email change (current password + new email; confirms via new inbox)
+//   * Account deletion (current password + confirm; soft-delete + 30d)
+async function renderSecurityCard(parent, myGen) {
+  const card = el('div', { class: 'card', style: 'margin-top:20px' });
+  card.appendChild(el('div', { class: 'section-header' },
+    el('h2', {}, 'Security'),
+    el('div', { class: 'section-sub' }, 'Password, two-factor, email, and account deletion.'),
+  ));
+  parent.appendChild(card);
+
+  // Refetch /me so we know the live 2FA state (auth.routes returns it).
+  let me;
+  try { me = await api('/api/auth/me'); } catch { me = State.user; }
+  if (stale(myGen)) return;
+
+  // --- Change password ---
+  const pwBlock = el('div', { class: 'security-block' },
+    el('h3', {}, 'Change password'),
+  );
+  const pwForm = el('form', { class: 'inline-form' },
+    el('label', {}, 'Current password',
+      el('input', { type: 'password', name: 'current', required: true, autocomplete: 'current-password' })),
+    el('label', {}, 'New password',
+      el('input', { type: 'password', name: 'next', required: true, minlength: 8, autocomplete: 'new-password' })),
+    el('button', { type: 'submit', class: 'btn btn-primary' }, 'Update password'),
+  );
+  pwForm.onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    try {
+      await api('/api/auth/password/change', { method: 'POST', body: {
+        currentPassword: String(fd.get('current') || ''),
+        newPassword:     String(fd.get('next') || ''),
+      }});
+      toast('Password updated.', 'success');
+      pwForm.reset();
+    } catch (ex) { toast(ex.message, 'error'); }
+  };
+  pwBlock.appendChild(pwForm);
+  card.appendChild(pwBlock);
+
+  // --- 2FA ---
+  const twoFaBlock = el('div', { class: 'security-block' },
+    el('h3', {}, 'Two-factor authentication'),
+    el('p', { class: 'security-sub' },
+      me.twoFactorEnabled
+        ? 'On — you\'ll be asked for a code on every new login.'
+        : 'Off — protect your account with an authenticator app.'),
+  );
+  if (me.twoFactorEnabled) {
+    twoFaBlock.appendChild(el('button', {
+      class: 'btn btn-danger btn-sm',
+      onclick: () => openDisable2FAModal(),
+    }, 'Disable 2FA'));
+  } else {
+    twoFaBlock.appendChild(el('button', {
+      class: 'btn btn-primary btn-sm',
+      onclick: () => open2FASetupModal(),
+    }, 'Set up 2FA'));
+  }
+  card.appendChild(twoFaBlock);
+
+  // --- Email change ---
+  const emailBlock = el('div', { class: 'security-block' },
+    el('h3', {}, 'Change email'),
+    el('p', { class: 'security-sub' },
+      'We\'ll send a confirmation link to the new address. Until you click it, your current email keeps working.'),
+  );
+  const emailForm = el('form', { class: 'inline-form' },
+    el('label', {}, 'New email',
+      el('input', { type: 'email', name: 'newEmail', required: true, autocomplete: 'email' })),
+    el('label', {}, 'Current password',
+      el('input', { type: 'password', name: 'pw', required: true, autocomplete: 'current-password' })),
+    el('button', { type: 'submit', class: 'btn' }, 'Send confirmation'),
+  );
+  emailForm.onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    try {
+      const out = await api('/api/auth/email/change-request', { method: 'POST', body: {
+        newEmail:        String(fd.get('newEmail') || ''),
+        currentPassword: String(fd.get('pw') || ''),
+      }});
+      toast(`Confirmation sent to ${out.sentTo}.`, 'success', 6000);
+      emailForm.reset();
+    } catch (ex) { toast(ex.message, 'error'); }
+  };
+  emailBlock.appendChild(emailForm);
+  card.appendChild(emailBlock);
+
+  // --- Delete account ---
+  const dangerBlock = el('div', { class: 'security-block security-block-danger' },
+    el('h3', {}, 'Delete account'),
+    el('p', { class: 'security-sub' },
+      'Soft-deletes your account. You have 30 days to email support to restore it; after that all your data — posts, leads, connected socials — is permanently removed.'),
+    el('button', {
+      class: 'btn btn-danger btn-sm',
+      onclick: () => openDeleteAccountModal(),
+    }, 'Delete my account'),
+  );
+  card.appendChild(dangerBlock);
+}
+
+// ---- 2FA enrollment modal -----------------------------------------------
+async function open2FASetupModal() {
+  if (document.getElementById('twofa-setup-modal')) return;
+  const backdrop = el('div', { class: 'modal-backdrop', id: 'twofa-setup-modal' });
+  const close = () => backdrop.remove();
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+
+  const card = el('div', { class: 'modal-card' });
+  card.appendChild(el('button', { class: 'modal-close', onclick: close, title: 'Close' }, '✕'));
+  card.appendChild(el('h2', {}, 'Set up two-factor authentication'));
+  card.appendChild(el('p', { class: 'upgrade-lede' },
+    'Scan the QR code with Google Authenticator, 1Password, Authy, or any TOTP app. Then enter the 6-digit code it shows to activate.'));
+  const body = el('div', {});
+  card.appendChild(body);
+  backdrop.appendChild(card);
+  document.body.appendChild(backdrop);
+
+  body.innerHTML = '<div class="loading"></div>';
+  let setup;
+  try {
+    setup = await api('/api/auth/2fa/setup', { method: 'POST' });
+  } catch (e) {
+    body.innerHTML = '';
+    body.appendChild(el('div', { class: 'auth-error show' }, e.message));
+    return;
+  }
+
+  body.innerHTML = '';
+  body.appendChild(el('div', { class: 'twofa-qr' },
+    el('img', { src: setup.qrDataUrl, alt: '2FA QR code' }),
+  ));
+  body.appendChild(el('details', { class: 'twofa-secret-details' },
+    el('summary', {}, "Can't scan? Enter this code manually"),
+    el('code', { class: 'twofa-secret' }, setup.secret),
+  ));
+
+  const form = el('form', { class: 'inline-form', style: 'margin-top:20px' },
+    el('label', {}, 'Code from your app',
+      el('input', { type: 'text', name: 'code', required: true,
+        autocomplete: 'one-time-code', inputmode: 'numeric', placeholder: '123456' })),
+    el('button', { type: 'submit', class: 'btn btn-primary' }, 'Activate 2FA'),
+  );
+  const err = el('div', { class: 'auth-error' });
+  body.appendChild(form);
+  body.appendChild(err);
+
+  form.onsubmit = async (ev) => {
+    ev.preventDefault();
+    err.classList.remove('show');
+    const code = String(new FormData(ev.target).get('code') || '').trim();
+    try {
+      const out = await api('/api/auth/2fa/activate', { method: 'POST', body: { code } });
+      close();
+      showBackupCodesModal(out.backupCodes);
+    } catch (ex) {
+      err.textContent = ex.message;
+      err.classList.add('show');
+    }
+  };
+}
+
+// ---- Backup codes screen (one-shot) -------------------------------------
+function showBackupCodesModal(codes) {
+  const backdrop = el('div', { class: 'modal-backdrop', id: 'backup-codes-modal' });
+  // No outside-click dismiss — the user MUST acknowledge before closing.
+  const card = el('div', { class: 'modal-card' });
+  card.appendChild(el('h2', {}, 'Save your backup codes'));
+  card.appendChild(el('p', { class: 'upgrade-lede' },
+    "Each code works once. Use them when you don't have your authenticator. Treat them like a password — store in a password manager. We'll never show them again."));
+
+  const grid = el('div', { class: 'backup-code-grid' },
+    ...codes.map(c => el('code', {}, c)),
+  );
+  card.appendChild(grid);
+
+  const actions = el('div', { class: 'upgrade-actions' });
+  actions.appendChild(el('button', {
+    class: 'btn',
+    onclick: () => {
+      navigator.clipboard.writeText(codes.join('\n')).then(() => toast('Copied to clipboard', 'success'));
+    },
+  }, 'Copy all'));
+  actions.appendChild(el('button', {
+    class: 'btn',
+    onclick: () => {
+      const blob = new Blob([codes.join('\n')], { type: 'text/plain' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'hitrapost-backup-codes.txt';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    },
+  }, 'Download .txt'));
+
+  // The acknowledgement gate. Only enables the dismiss button when ticked.
+  const ack = el('label', { class: 'security-ack' },
+    el('input', { type: 'checkbox' }),
+    el('span', {}, "I've saved these somewhere safe."),
+  );
+  const dismiss = el('button', { class: 'btn btn-primary', disabled: true,
+    onclick: () => {
+      backdrop.remove();
+      toast('2FA enabled. Next login will ask for a code.', 'success');
+      // Re-render security card so the toggle flips.
+      if (State.route === 'settings') navigate('settings', { replace: true });
+    },
+  }, 'I saved them, continue');
+  ack.querySelector('input').addEventListener('change', (e) => {
+    dismiss.disabled = !e.target.checked;
+  });
+
+  actions.appendChild(dismiss);
+  card.appendChild(ack);
+  card.appendChild(actions);
+  backdrop.appendChild(card);
+  document.body.appendChild(backdrop);
+}
+
+// ---- Disable 2FA modal --------------------------------------------------
+function openDisable2FAModal() {
+  const backdrop = el('div', { class: 'modal-backdrop' });
+  const close = () => backdrop.remove();
+  backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+
+  const form = el('form', { class: 'inline-form' },
+    el('label', {}, 'Current 2FA code (or backup code)',
+      el('input', { type: 'text', name: 'code', required: true,
+        autocomplete: 'one-time-code', placeholder: '123456' })),
+    el('div', { class: 'upgrade-actions' },
+      el('button', { type: 'button', class: 'btn btn-ghost', onclick: close }, 'Cancel'),
+      el('button', { type: 'submit', class: 'btn btn-danger' }, 'Disable 2FA'),
+    ),
+  );
+  const err = el('div', { class: 'auth-error' });
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    err.classList.remove('show');
+    const code = String(new FormData(e.target).get('code') || '').trim();
+    try {
+      await api('/api/auth/2fa/disable', { method: 'POST', body: { code } });
+      close();
+      toast('2FA disabled.', 'info');
+      if (State.route === 'settings') navigate('settings', { replace: true });
+    } catch (ex) {
+      err.textContent = ex.message; err.classList.add('show');
+    }
+  };
+
+  const card = el('div', { class: 'modal-card' });
+  card.appendChild(el('button', { class: 'modal-close', onclick: close, title: 'Close' }, '✕'));
+  card.appendChild(el('h2', {}, 'Disable two-factor authentication'));
+  card.appendChild(el('p', { class: 'upgrade-lede' },
+    'You\'ll lose the second factor on your account. Anyone with your password will be able to sign in.'));
+  card.appendChild(form);
+  card.appendChild(err);
+  backdrop.appendChild(card);
+  document.body.appendChild(backdrop);
+}
+
+// ---- Account deletion modal ---------------------------------------------
+function openDeleteAccountModal() {
+  const backdrop = el('div', { class: 'modal-backdrop' });
+  const close = () => backdrop.remove();
+  backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+
+  const form = el('form', { class: 'inline-form' },
+    el('label', {}, 'Type DELETE to confirm',
+      el('input', { type: 'text', name: 'confirm', required: true, autocomplete: 'off', placeholder: 'DELETE' })),
+    el('label', {}, 'Current password',
+      el('input', { type: 'password', name: 'pw', required: true, autocomplete: 'current-password' })),
+    el('div', { class: 'upgrade-actions' },
+      el('button', { type: 'button', class: 'btn btn-ghost', onclick: close }, 'Cancel'),
+      el('button', { type: 'submit', class: 'btn btn-danger' }, 'Delete my account'),
+    ),
+  );
+  const err = el('div', { class: 'auth-error' });
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    err.classList.remove('show');
+    const fd = new FormData(e.target);
+    if (String(fd.get('confirm') || '') !== 'DELETE') {
+      err.textContent = 'Type DELETE exactly to confirm.';
+      err.classList.add('show');
+      return;
+    }
+    try {
+      await api('/api/auth/account/delete', { method: 'POST', body: {
+        currentPassword: String(fd.get('pw') || ''),
+      }});
+      close();
+      State.user = null;
+      toast('Account scheduled for deletion. Email support@hitrapost.co.uk within 30 days to restore.', 'info', 8000);
+      renderAuthScreen();
+    } catch (ex) {
+      err.textContent = ex.message; err.classList.add('show');
+    }
+  };
+
+  const card = el('div', { class: 'modal-card' });
+  card.appendChild(el('button', { class: 'modal-close', onclick: close, title: 'Close' }, '✕'));
+  card.appendChild(el('h2', {}, 'Delete your account?'));
+  card.appendChild(el('p', { class: 'upgrade-lede' },
+    'You\'ll be signed out immediately. We keep your data for 30 days in case you change your mind — after that everything is permanently removed.'));
+  card.appendChild(form);
+  card.appendChild(err);
+  backdrop.appendChild(card);
+  document.body.appendChild(backdrop);
 }
 
 (async function main() {

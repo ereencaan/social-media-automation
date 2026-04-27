@@ -104,7 +104,7 @@ async function login({ email, password }) {
   // Trim email (copy-paste often adds whitespace). Do NOT trim password —
   // users may legitimately use leading/trailing spaces as part of a secret.
   const normEmail = String(email).trim().toLowerCase();
-  const user = prepare('SELECT * FROM users WHERE email = ?').get(normEmail);
+  const user = prepare('SELECT * FROM users WHERE email = ? AND deleted_at IS NULL').get(normEmail);
   if (!user) {
     console.warn('[auth] login miss: no user for email=%j (len=%d)', normEmail, normEmail.length);
     throw new Error('Invalid credentials');
@@ -121,7 +121,7 @@ async function login({ email, password }) {
 
 function getUser(userId) {
   const user = prepare(
-    'SELECT id, org_id, email, name, role, created_at, email_verified_at FROM users WHERE id = ?'
+    'SELECT id, org_id, email, name, role, created_at, email_verified_at FROM users WHERE id = ? AND deleted_at IS NULL'
   ).get(userId);
   if (!user) return null;
   return {
@@ -131,7 +131,166 @@ function getUser(userId) {
   };
 }
 
+// =========================================================================
+//   PASSWORD RESET
+// =========================================================================
+// Always pretend success — leaking which emails are registered is a free
+// user-enumeration oracle. The email is only sent if the address actually
+// maps to an account.
+async function requestPasswordReset(rawEmail) {
+  if (!rawEmail) return { ok: true };
+  const normEmail = String(rawEmail).trim().toLowerCase();
+  const user = prepare(
+    'SELECT id, name FROM users WHERE email = ? AND deleted_at IS NULL'
+  ).get(normEmail);
+  if (!user) return { ok: true };
+
+  const token = crypto.randomBytes(24).toString('hex');
+  const expires = new Date(Date.now() + RESET_TOKEN_TTL_MIN * 60 * 1000).toISOString();
+  prepare(`
+    UPDATE users SET password_reset_token = ?, password_reset_expires_at = ? WHERE id = ?
+  `).run(token, expires, user.id);
+
+  email.sendPasswordResetEmail({ to: normEmail, name: user.name, token })
+    .catch(err => console.warn('[auth] reset email send failed:', err.message));
+  return { ok: true };
+}
+
+async function resetPassword(token, newPassword) {
+  if (!token || !newPassword) throw new Error('Token and password are required');
+  if (newPassword.length < 8) throw new Error('Password must be at least 8 characters');
+
+  const user = prepare(`
+    SELECT id, password_reset_expires_at
+    FROM users WHERE password_reset_token = ? AND deleted_at IS NULL
+  `).get(token);
+  if (!user) throw new Error('This reset link is invalid or has been used');
+  if (!user.password_reset_expires_at || new Date(user.password_reset_expires_at).getTime() < Date.now()) {
+    throw new Error('This reset link has expired');
+  }
+
+  const hash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+  prepare(`
+    UPDATE users
+    SET password_hash = ?,
+        password_reset_token = NULL,
+        password_reset_expires_at = NULL,
+        failed_login_count = 0,
+        locked_until = NULL
+    WHERE id = ?
+  `).run(hash, user.id);
+  return { ok: true };
+}
+
+async function changePassword(userId, currentPassword, newPassword) {
+  if (!currentPassword || !newPassword) throw new Error('Current and new password required');
+  if (newPassword.length < 8)               throw new Error('New password must be at least 8 characters');
+  if (currentPassword === newPassword)      throw new Error('New password must differ from current');
+
+  const user = prepare('SELECT password_hash FROM users WHERE id = ?').get(userId);
+  if (!user) throw new Error('User not found');
+  const ok = await bcrypt.compare(currentPassword, user.password_hash);
+  if (!ok) throw new Error('Current password is incorrect');
+
+  const hash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+  prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, userId);
+  return { ok: true };
+}
+
+// =========================================================================
+//   EMAIL CHANGE — confirm via the NEW inbox
+// =========================================================================
+// Until the user clicks the link sent to the new address, the old email
+// keeps working. We don't also confirm from the OLD inbox because the user
+// is already authenticated; if a session is hijacked the attacker fails at
+// the confirmation step (they don't control the new inbox they typed in).
+async function requestEmailChange(userId, currentPassword, rawNewEmail) {
+  if (!rawNewEmail) throw new Error('New email is required');
+  const normEmail = String(rawNewEmail).trim().toLowerCase();
+  if (isDisposable(normEmail)) throw new Error('Disposable email providers are not allowed.');
+
+  const user = prepare('SELECT email, name, password_hash FROM users WHERE id = ?').get(userId);
+  if (!user) throw new Error('User not found');
+  if (normEmail === user.email) throw new Error('That is already your current email');
+
+  const ok = await bcrypt.compare(currentPassword || '', user.password_hash);
+  if (!ok) throw new Error('Current password is incorrect');
+
+  const taken = prepare('SELECT id FROM users WHERE email = ? AND id != ?').get(normEmail, userId);
+  if (taken) throw new Error('That email is already in use');
+
+  const token   = crypto.randomBytes(24).toString('hex');
+  const expires = new Date(Date.now() + VERIFY_TOKEN_TTL_HOURS * 3600 * 1000).toISOString();
+  prepare(`
+    UPDATE users
+    SET email_change_new = ?, email_change_token = ?, email_change_expires_at = ?
+    WHERE id = ?
+  `).run(normEmail, token, expires, userId);
+
+  // Send to the NEW address — proving control of the new inbox is the point.
+  await email.sendVerificationEmail({ to: normEmail, name: user.name, token });
+  return { ok: true, sentTo: normEmail };
+}
+
+function confirmEmailChange(token) {
+  if (!token) return false;
+  const user = prepare(`
+    SELECT id, email_change_new, email_change_expires_at
+    FROM users WHERE email_change_token = ?
+  `).get(token);
+  if (!user || !user.email_change_new) return false;
+  if (user.email_change_expires_at && new Date(user.email_change_expires_at).getTime() < Date.now()) {
+    return false;
+  }
+
+  // Race: another account claimed the email between request and confirm.
+  const taken = prepare('SELECT id FROM users WHERE email = ? AND id != ?')
+    .get(user.email_change_new, user.id);
+  if (taken) return false;
+
+  prepare(`
+    UPDATE users
+    SET email = ?,
+        email_verified_at = datetime('now'),
+        email_change_new = NULL,
+        email_change_token = NULL,
+        email_change_expires_at = NULL
+    WHERE id = ?
+  `).run(user.email_change_new, user.id);
+  return true;
+}
+
+// =========================================================================
+//   ACCOUNT DELETION — soft-delete with 30-day grace
+// =========================================================================
+// `deleted_at` flips the user out of all auth checks (login + getUser +
+// password reset queries all gate on `WHERE deleted_at IS NULL`). After
+// `delete_purge_at` arrives, a cron in billing.service hard-deletes the
+// user, which cascades through orgs → posts → leads → social_credentials
+// via FK ON DELETE CASCADE.
+const DELETE_GRACE_DAYS = 30;
+
+async function deleteAccount(userId, currentPassword) {
+  const user = prepare(
+    'SELECT password_hash FROM users WHERE id = ? AND deleted_at IS NULL'
+  ).get(userId);
+  if (!user) throw new Error('User not found');
+  const ok = await bcrypt.compare(currentPassword || '', user.password_hash);
+  if (!ok) throw new Error('Current password is incorrect');
+
+  const purgeAt = new Date(Date.now() + DELETE_GRACE_DAYS * 24 * 3600 * 1000).toISOString();
+  prepare(`
+    UPDATE users
+    SET deleted_at = datetime('now'), delete_purge_at = ?
+    WHERE id = ?
+  `).run(purgeAt, userId);
+  return { ok: true, purgeAt };
+}
+
 module.exports = {
   register, login, getUser,
   verifyEmailToken, resendVerificationEmail, isEmailVerified,
+  requestPasswordReset, resetPassword, changePassword,
+  requestEmailChange, confirmEmailChange,
+  deleteAccount, DELETE_GRACE_DAYS,
 };

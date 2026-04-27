@@ -97,12 +97,12 @@
 - [x] Rate limit: login (10/15min), register (6/hr), 2FA verify (8/10min)
 - [x] TOTP 2FA backend (enroll, activate, disable, login challenge)
 - [x] Backup-code consumption with optimistic concurrency
-- [ ] **2FA enrollment UI** — QR code modal in Settings → Security
-- [ ] **2FA login challenge UI** — code prompt after password
-- [ ] **Backup codes screen** — show 10 codes once, "I saved them" confirm
-- [ ] Password reset flow: request → token email → reset form
-- [ ] Email change flow: confirm via current + new email
-- [ ] Account deletion (with confirmation + 30-day grace soft-delete)
+- [x] **2FA enrollment UI** — QR code modal in Settings → Security
+- [x] **2FA login challenge UI** — code prompt after password
+- [x] **Backup codes screen** — show 10 codes once, "I saved them" confirm
+- [x] Password reset flow: request → token email → reset form
+- [x] Email change flow: confirm via current + new email
+- [x] Account deletion (with confirmation + 30-day grace soft-delete)
 
 ---
 
