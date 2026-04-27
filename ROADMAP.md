@@ -154,16 +154,15 @@
 - [x] `email` chip (forwarding-based, see P3.email)
 
 ### Email-to-lead (universal channel — solves Tidio free, Crisp free, all form-notification emails, direct customer mails)
-- [x] `email` source chip + amber color (frontend placeholder; handler not wired yet)
-- [ ] Inbound provider: SendGrid Inbound Parse (free tier) — DNS: `MX leads.hitrapost.co.uk → mx.sendgrid.net`
-- [ ] `POST /api/intake/email` endpoint receives multipart from SendGrid, extracts `to` token
-- [ ] `email-parser.service.js` — name/phone/message heuristics + From-header source detection
-  - `notifications@tidio.com` → `tidio_livechat`
-  - `noreply@tawk.to` → `tawk_livechat`
-  - `wordpress@*` / form plugin patterns → `wordpress_form`
-  - generic → `email`
-- [ ] Per-org forwarding address: `{intake_token}@leads.hitrapost.co.uk`
+- [x] `email` source chip in SOURCE_META
+- [x] `email-parser.service.js` — From-header parsing (display name + address), local-part name guess, body phone extraction (10–15 digit window), HTML stripping, Message-Id dedupe
+- [x] Source detection: `notifications@tidio.com` → `tidio_livechat`, `noreply@tawk.to` → `tawk`, Crisp / Smartsupp / LiveChat / JivoChat domains, `[Contact Form 7]` / WPForms / Elementor / Gravity / Ninja subject hints → `wordpress_form`, generic → `email`
+- [x] `POST /api/intake/email` route — multer multipart parsing, recipient-domain check (`EMAIL_INBOUND_DOMAIN`), optional shared secret (`EMAIL_INBOUND_SECRET`), always-200 to drop provider retries on bad input
+- [x] `intake.service.ingestEmail()` — creates lead with email-source activity, reuses existing `(source, source_ref)` dedupe
+- [x] Per-org forwarding address: `{intake_token}@leads.hitrapost.co.uk`
+- [ ] **User: SendGrid Inbound Parse setup** — receiving domain `leads.hitrapost.co.uk`, destination URL `https://hitrapost.co.uk/api/intake/email`, MX record on Cloudflare, set `EMAIL_INBOUND_SECRET` on prod
 - [ ] Settings → "Email-to-Lead Address" reveal card + Tidio/Gmail forward setup guide
+- [ ] CF7 / WPForms body-parser (extract name+email from "Name: X / Email: Y" patterns instead of using sender display name)
 
 ### Meta App Review (UNBLOCKS real IG/FB DM ingest)
 - [!] App icon 1024×1024

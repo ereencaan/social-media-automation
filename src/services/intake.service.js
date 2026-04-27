@@ -207,8 +207,48 @@ function ingestTawk(orgId, body = {}) {
   return lead;
 }
 
+// ---- Email-to-lead ingest ----------------------------------------------
+//
+// Inbound emails from SendGrid Inbound Parse (or any provider with the
+// same shape — easy to swap) get parsed into the same flat structure
+// /api/intake uses, then handed to leadsService. The token comes from
+// the local-part of the recipient address, e.g.
+// "abc123@leads.hitrapost.co.uk" → intake_token = "abc123".
+//
+// Returns the lead on success, or null when the email had nothing to
+// pin a lead on (no name, email, or phone). The route always responds
+// 200 to the provider so retries don't pile up — it's better to drop a
+// junk auto-reply than to flood SendGrid's retry queue.
+function ingestEmail(orgId, parsed = {}) {
+  if (!orgId) throw new Error('orgId required');
+  if (!parsed.name && !parsed.email && !parsed.phone) return null;
+
+  const lead = leadsService.createLead(orgId, {
+    source:    parsed.source || 'email',
+    sourceRef: parsed.sourceRef,
+    name:      parsed.name,
+    email:     parsed.email,
+    phone:     parsed.phone,
+    notes:     parsed.message,
+  });
+
+  leadsService.addActivity(orgId, lead.id, null, {
+    type: 'email',
+    content: parsed.message || '(no body)',
+    metadata: {
+      email: true,
+      source: parsed.source,
+      from: parsed.raw && parsed.raw.from,
+      to: parsed.raw && parsed.raw.to,
+      subject: parsed.raw && parsed.raw.subject,
+    },
+  });
+
+  return lead;
+}
+
 module.exports = {
   getOrgByToken, getOrCreateToken, regenerateToken,
-  normalizePayload, canonicalSource, ingest, ingestTawk,
+  normalizePayload, canonicalSource, ingest, ingestTawk, ingestEmail,
   SOURCE_ALIASES,
 };
