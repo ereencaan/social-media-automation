@@ -43,8 +43,8 @@
 - [ ] Schedule + publish smoke: scheduled post fires on time
 
 ### P0.5 — Don't lose data
-- [ ] Nightly backup: `posts.db` → Cloudflare R2 / B2 (cron, 30-day retention)
-- [ ] Restore-from-backup runbook documented
+- [x] Nightly backup: `posts.db` → Cloudflare R2 / B2 (cron, 30-day retention)
+- [x] Restore-from-backup runbook documented
 
 ---
 
