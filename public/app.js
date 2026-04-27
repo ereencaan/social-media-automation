@@ -549,11 +549,20 @@ function renderLeadCard(lead) {
 // Source badge: icon + short label + colored chip so the origin channel
 // is scannable at a glance in the kanban.
 const SOURCE_META = {
-  instagram_dm:     { icon: '📷', label: 'Instagram', cls: 'src-instagram' },
-  facebook_message: { icon: '👥', label: 'Facebook',  cls: 'src-facebook'  },
-  linkedin:         { icon: '💼', label: 'LinkedIn',  cls: 'src-linkedin'  },
-  webhook:          { icon: '🔗', label: 'Webhook',   cls: 'src-webhook'   },
-  manual:           { icon: '✍',  label: 'Manual',    cls: 'src-manual'    },
+  instagram_dm:     { icon: '📷', label: 'Instagram',     cls: 'src-instagram' },
+  facebook_message: { icon: '👥', label: 'Facebook',      cls: 'src-facebook'  },
+  linkedin:         { icon: '💼', label: 'LinkedIn',      cls: 'src-linkedin'  },
+  webhook:          { icon: '🔗', label: 'Webhook',       cls: 'src-webhook'   },
+  manual:           { icon: '✍',  label: 'Manual',        cls: 'src-manual'    },
+  // P3 expansion — third-party intake channels share the webhook pipeline
+  // but get their own chips so the user knows where each lead came from.
+  tidio_livechat:   { icon: '💬', label: 'Tidio chat',    cls: 'src-tidio'     },
+  tawk:             { icon: '💭', label: 'Tawk.to',       cls: 'src-tawk'      },
+  crisp:            { icon: '◐',  label: 'Crisp',         cls: 'src-crisp'     },
+  smartsupp:        { icon: '◓',  label: 'Smartsupp',     cls: 'src-smartsupp' },
+  livechat:         { icon: '○',  label: 'LiveChat',      cls: 'src-livechat'  },
+  wordpress_form:   { icon: 'W',  label: 'WordPress',     cls: 'src-wordpress' },
+  email:            { icon: '✉',  label: 'Email',         cls: 'src-email'     },
 };
 function renderSourceBadge(source) {
   const meta = SOURCE_META[source] || SOURCE_META.manual;

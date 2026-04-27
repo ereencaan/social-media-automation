@@ -41,6 +41,45 @@ function regenerateToken(orgId) {
 
 // ---- payload normalization ---------------------------------------------
 
+// Source aliases — incoming payloads use whatever string the integration
+// sender chose (Tidio sends "tidio", our WP plugin sends "wp_cf7", etc).
+// We normalize to the canonical chip ids the frontend renders. Anything we
+// don't recognise is passed through unchanged so custom integrations work.
+const SOURCE_ALIASES = {
+  // Live-chat platforms.
+  'tidio':            'tidio_livechat',
+  'tidio_chat':       'tidio_livechat',
+  'tidio.com':        'tidio_livechat',
+  'tawk.to':          'tawk',
+  'tawkto':           'tawk',
+  'crisp.chat':       'crisp',
+  'smartsupp.com':    'smartsupp',
+  'livechat.com':     'livechat',
+  'livechatinc':      'livechat',
+  'jivochat':         'livechat',     // close enough for chip purposes
+  // WordPress form plugins — all funnel through one chip.
+  'wp':               'wordpress_form',
+  'wordpress':        'wordpress_form',
+  'wp_cf7':           'wordpress_form',
+  'cf7':              'wordpress_form',
+  'wpforms':          'wordpress_form',
+  'gravity':          'wordpress_form',
+  'gravityforms':     'wordpress_form',
+  'ninja':            'wordpress_form',
+  'ninjaforms':       'wordpress_form',
+  'elementor':        'wordpress_form',
+  'elementor_form':   'wordpress_form',
+  // Email forwarding.
+  'email_forward':    'email',
+  'forwarded_email':  'email',
+};
+
+function canonicalSource(rawSource) {
+  if (!rawSource) return 'webhook';
+  const cleaned = String(rawSource).trim().toLowerCase();
+  return SOURCE_ALIASES[cleaned] || cleaned;
+}
+
 function pickFirst(obj, keys) {
   for (const k of keys) {
     if (obj && obj[k] != null && String(obj[k]).trim() !== '') return String(obj[k]).trim();
@@ -63,9 +102,9 @@ function normalizePayload(body = {}) {
   const message = pickFirst(body, [
     'message', 'comment', 'body', 'text', 'note', 'notes',
   ]);
-  const source = pickFirst(body, [
+  const source = canonicalSource(pickFirst(body, [
     'source', 'channel', 'utm_source',
-  ]) || 'webhook';
+  ]));
   const sourceRef = pickFirst(body, [
     'source_ref', 'sourceRef', 'submission_id', 'id', 'external_id',
   ]);
@@ -99,5 +138,6 @@ function ingest(orgId, rawBody) {
 
 module.exports = {
   getOrgByToken, getOrCreateToken, regenerateToken,
-  normalizePayload, ingest,
+  normalizePayload, canonicalSource, ingest,
+  SOURCE_ALIASES,
 };

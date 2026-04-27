@@ -117,29 +117,29 @@
 - [x] Lead drawer with AI email draft
 
 ### Tidio (live chat) — quick wins
-- [ ] Tidio chatbot flow with "Send Webhook" action → `/api/intake/:token`
-- [ ] Add `tidio_livechat` source chip + icon
-- [ ] Document: "Connect Tidio in 5 minutes" guide (Settings page link)
+- [~] Tidio chatbot flow with "Send Webhook" action → `/api/intake/:token` (docs in docs/integrations/live-chat.md; user wires it in Tidio)
+- [x] Add `tidio_livechat` source chip + icon
+- [x] Document: "Connect Tidio in 5 minutes" guide (docs/integrations/live-chat.md)
 
 ### WordPress connector (own brand + sellable to customers)
-- [ ] Custom WP plugin: `Hitrapost Connector`
-  - [ ] Settings page (paste intake URL)
-  - [ ] Hooks Contact Form 7 submissions → POST
-  - [ ] Hooks WPForms / Elementor Forms / Gravity Forms / Ninja Forms
+- [x] Custom WP plugin: `Hitrapost Connector`
+  - [x] Settings page (paste intake URL)
+  - [x] Hooks Contact Form 7 submissions → POST
+  - [x] Hooks WPForms / Elementor Forms / Gravity Forms / Ninja Forms
   - [ ] Optional: page-view tracking (later)
-- [ ] Distribute as ZIP / WP plugin directory submission
+- [~] Distribute as ZIP / WP plugin directory submission (zip script in integrations/wordpress-plugin/README.md; user submits to wp.org)
 
 ### Other live-chat platforms (sellable feature parity)
-- [ ] Tawk.to webhook integration guide
-- [ ] Crisp integration
-- [ ] Smartsupp integration
-- [ ] LiveChat / JivoChat integrations
+- [x] Tawk.to webhook integration guide
+- [x] Crisp integration
+- [x] Smartsupp integration
+- [x] LiveChat / JivoChat integrations
 
 ### Source chip expansion
-- [ ] `tidio_livechat` chip
-- [ ] `wordpress_form` chip
-- [ ] `tawk` / `crisp` chips
-- [ ] `email` chip (forwarding-based, see P3.email)
+- [x] `tidio_livechat` chip
+- [x] `wordpress_form` chip
+- [x] `tawk` / `crisp` chips
+- [x] `email` chip (forwarding-based, see P3.email)
 
 ### Email-to-lead (later, requires SMTP+IMAP)
 - [ ] Per-org forwarding address (`leads-{orgToken}@hitrapost.co.uk`)
