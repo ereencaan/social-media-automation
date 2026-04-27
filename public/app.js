@@ -45,6 +45,14 @@ async function api(path, { method = 'GET', body, query } = {}) {
     const err = new Error(msg);
     err.status = res.status;
     err.data = data;
+    // 402 = "you need to upgrade / past quota". Open the upgrade modal
+    // automatically so every quota-gated route gets the right UX without
+    // each call site needing to handle 402 by hand. The thrown error still
+    // bubbles so the call site can decide what to do (toast, restore form,
+    // etc.) — we just guarantee the modal renders.
+    if (res.status === 402 && typeof openUpgradeModal === 'function') {
+      try { openUpgradeModal(data || {}); } catch { /* ignore modal failures */ }
+    }
     throw err;
   }
   return data;
@@ -226,6 +234,25 @@ async function bootApp() {
     renderAuthScreen();
   };
 
+  // Stripe redirect handling: success / cancel land back here with a query
+  // param. We toast the result and strip the param so a refresh doesn't
+  // re-fire it.
+  if (location.search.includes('billing=')) {
+    const q = new URLSearchParams(location.search);
+    const status = q.get('billing');
+    if (status === 'success') {
+      toast('Subscription active. Welcome aboard!', 'success', 6000);
+      // Bust the cached billing/me — server has already synced from the
+      // webhook by the time the redirect lands, but the cached value the
+      // dashboard fetched at boot will be stale.
+      _plansCache = null;
+    } else if (status === 'canceled') {
+      toast('Checkout canceled. No charge.', 'info');
+    }
+    // Strip the query string while preserving the hash route.
+    history.replaceState(null, '', location.pathname + location.hash);
+  }
+
   // Route from hash or default
   const initialRoute = (location.hash.replace('#', '') || 'dashboard');
   navigate(initialRoute, { replace: true });
@@ -286,11 +313,12 @@ function stale(myGen) { return myGen !== renderGen; }
 // =======================================================================
 VIEWS.dashboard = async function dashboardView(root, myGen) {
   root.innerHTML = '<div class="loading"></div>';
-  let leads = [], posts = [];
+  let leads = [], posts = [], billing = null;
   try {
-    [leads, posts] = await Promise.all([
+    [leads, posts, billing] = await Promise.all([
       api('/api/leads').catch(() => []),
       api('/api/posts').catch(() => []),
+      api('/api/billing/me').catch(() => null),
     ]);
   } catch {}
   if (stale(myGen)) return;
@@ -317,6 +345,46 @@ VIEWS.dashboard = async function dashboardView(root, myGen) {
       el('div', { class: 'card-hint' }, s.hint),
     )),
   ));
+
+  // Trial countdown banner — appears in the last 3 days only.
+  if (billing?.inTrial && billing.trialEndsAt) {
+    const days = Math.ceil((new Date(billing.trialEndsAt) - Date.now()) / (24 * 3600 * 1000));
+    if (days <= 3 && days >= 0) {
+      const banner = el('div', { class: 'trial-banner' },
+        el('span', {}, `Trial ends in ${days} day${days === 1 ? '' : 's'}.`),
+        el('a', {
+          class: 'trial-banner-cta',
+          href: '#settings',
+          onclick: (e) => { e.preventDefault(); navigate('settings'); },
+        }, 'Manage billing →'),
+      );
+      root.appendChild(banner);
+    }
+  }
+
+  // Usage indicator — visible to everyone with a plan, helps avoid surprise
+  // 402s mid-flow. Hidden for unlimited tiers (Agency / Enterprise).
+  if (billing && billing.quotas) {
+    const showAny = ['posts', 'ai_calls', 'leads']
+      .some(m => billing.quotas[m] !== -1);
+    if (showAny) {
+      const usageCard = el('div', { class: 'card' });
+      usageCard.appendChild(el('div', { class: 'section-header' },
+        el('h2', {}, 'This month'),
+        el('a', {
+          class: 'section-sub',
+          href: '#settings',
+          onclick: (e) => { e.preventDefault(); navigate('settings'); },
+        }, 'Manage plan →'),
+      ));
+      const bars = el('div', { class: 'usage-bars' });
+      for (const metric of ['posts', 'ai_calls', 'leads']) {
+        bars.appendChild(renderUsageBar(metric, billing.usage[metric] || 0, billing.quotas[metric]));
+      }
+      usageCard.appendChild(bars);
+      root.appendChild(usageCard);
+    }
+  }
 
   // Recent leads table
   const section = el('div', { class: 'card' });
@@ -2642,8 +2710,11 @@ VIEWS.settings = async function settingsView(root, myGen) {
   const u = State.user;
   root.innerHTML = '';
 
+  // ---- Billing card (top of Settings — most-asked question) ----
+  renderBillingCard(root, myGen);
+
   // ---- Account card ----
-  const card = el('div', { class: 'card' });
+  const card = el('div', { class: 'card', style: 'margin-top:20px' });
   card.appendChild(el('div', { class: 'section-header' },
     el('h2', {}, 'Account'),
     el('div', { class: 'section-sub' }, 'Your profile & workspace'),
@@ -2857,6 +2928,341 @@ function formatDate(s, { dateOnly = false } = {}) {
 // =======================================================================
 //   BOOTSTRAP
 // =======================================================================
+// =======================================================================
+//   BILLING — pricing view, upgrade modal, usage bars
+// =======================================================================
+
+// Cache the plans catalog for the session — small, public, and queried by
+// every billing UI. Falls back to an empty catalog if the API isn't up.
+let _plansCache = null;
+async function loadPlans() {
+  if (_plansCache) return _plansCache;
+  try {
+    _plansCache = await api('/api/public/billing/plans');
+  } catch {
+    _plansCache = {};
+  }
+  return _plansCache;
+}
+
+function gbp(amount) {
+  if (amount == null) return 'Custom';
+  if (amount === 0)   return 'Free';
+  return '£' + amount;
+}
+
+function formatQuota(n) {
+  if (n === -1) return 'Unlimited';
+  if (n >= 1000) return (n / 1000).toFixed(n % 1000 === 0 ? 0 : 1) + 'k';
+  return String(n);
+}
+
+// ---- Upgrade modal (shown on 402, also from "Upgrade" buttons) ----------
+function openUpgradeModal({ code, metric, limit, used, currentPlan, requiredPlan, planStatus, resetsAt } = {}) {
+  // Avoid stacking — if the modal is already up, leave it alone.
+  if (document.getElementById('upgrade-modal')) return;
+
+  const backdrop = el('div', { class: 'modal-backdrop', id: 'upgrade-modal' });
+  const close = () => backdrop.remove();
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+
+  let title = 'Upgrade to keep going';
+  let lede  = '';
+  if (code === 'quota_exceeded') {
+    const metricLabel = ({ posts: 'posts', ai_calls: 'AI calls', leads: 'leads' }[metric]) || metric;
+    title = `You've hit this month's ${metricLabel} limit`;
+    lede  = `You've used ${used} of ${limit} ${metricLabel} on the ${currentPlan || 'free'} plan. Upgrade to keep generating, or wait until ${resetsAt ? new Date(resetsAt).toLocaleDateString() : 'next month'} for the counter to reset.`;
+  } else if (code === 'plan_required') {
+    title = `${requiredPlan ? requiredPlan[0].toUpperCase() + requiredPlan.slice(1) : 'A higher'} plan required`;
+    lede  = `This feature is included on ${requiredPlan} and above. You're on ${currentPlan || 'free'}.`;
+  } else if (code === 'plan_inactive') {
+    title = 'Your subscription needs attention';
+    lede  = `Your billing status is "${planStatus}". Update your card to restore access.`;
+  } else {
+    lede = 'Upgrade to a paid plan to continue.';
+  }
+
+  const card = el('div', { class: 'modal-card upgrade-modal' });
+  card.appendChild(el('button', { class: 'modal-close', onclick: close, title: 'Close' }, '✕'));
+  card.appendChild(el('h2', {}, title));
+  card.appendChild(el('p', { class: 'upgrade-lede' }, lede));
+
+  const planRow = el('div', { class: 'upgrade-plans' });
+  card.appendChild(planRow);
+  card.appendChild(el('div', { class: 'upgrade-actions' },
+    el('button', {
+      class: 'btn btn-ghost',
+      onclick: close,
+    }, 'Maybe later'),
+    el('a', {
+      class: 'btn btn-primary',
+      href: '#pricing',
+      onclick: () => { close(); navigate('pricing'); },
+    }, 'See all plans'),
+  ));
+
+  backdrop.appendChild(card);
+  document.body.appendChild(backdrop);
+
+  // Async: fill the inline plan summary so the user can one-click upgrade.
+  loadPlans().then(plans => {
+    planRow.innerHTML = '';
+    const sequence = ['starter', 'pro', 'agency'];
+    const cur = currentPlan || 'free';
+    for (const id of sequence) {
+      const p = plans[id];
+      if (!p) continue;
+      // Only show plans strictly ABOVE the current one — no point in
+      // suggesting a sideways move.
+      if (plans[cur] && p.rank <= plans[cur].rank) continue;
+      planRow.appendChild(renderPricingCardCompact(p));
+    }
+    if (!planRow.children.length) {
+      planRow.appendChild(el('div', { class: 'pricing-empty' },
+        'You\'re already on our top published plan. Contact sales for Enterprise.'));
+    }
+  });
+}
+
+function renderPricingCardCompact(plan) {
+  return el('div', { class: 'pricing-card pricing-card-compact' },
+    el('div', { class: 'pricing-card-name' }, plan.name),
+    el('div', { class: 'pricing-card-price' },
+      el('span', { class: 'pricing-card-price-amount' }, gbp(plan.priceMonthlyGbp)),
+      plan.priceMonthlyGbp != null && plan.priceMonthlyGbp > 0
+        ? el('span', { class: 'pricing-card-price-period' }, '/mo')
+        : null,
+    ),
+    el('ul', { class: 'pricing-card-list' },
+      el('li', {}, formatQuota(plan.quotas.posts)    + ' posts/mo'),
+      el('li', {}, formatQuota(plan.quotas.ai_calls) + ' AI calls/mo'),
+      el('li', {}, formatQuota(plan.quotas.leads)    + ' leads/mo'),
+    ),
+    el('button', {
+      class: 'btn btn-primary btn-block',
+      onclick: () => startCheckout(plan.id, 'monthly'),
+    }, `Upgrade to ${plan.name}`),
+  );
+}
+
+async function startCheckout(plan, interval) {
+  if (!State.user) { navigate('pricing'); return; }
+  try {
+    const { url } = await api('/api/billing/checkout', { method: 'POST', body: { plan, interval } });
+    window.location.href = url;
+  } catch (e) {
+    if (e.status === 503) {
+      toast('Billing is not yet live — we\'ll email you when it is.', 'info', 5000);
+    } else {
+      toast(e.message, 'error');
+    }
+  }
+}
+
+async function openCustomerPortal() {
+  try {
+    const { url } = await api('/api/billing/portal', { method: 'POST' });
+    window.location.href = url;
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+// ---- VIEW: pricing -------------------------------------------------------
+VIEWS.pricing = async function pricingView(root, myGen) {
+  $('#page-title').textContent = 'Pricing';
+  root.innerHTML = '<div class="loading"></div>';
+
+  const [plans, billing] = await Promise.all([
+    loadPlans(),
+    State.user ? api('/api/billing/me').catch(() => null) : Promise.resolve(null),
+  ]);
+  if (stale(myGen)) return;
+
+  root.innerHTML = '';
+
+  const intro = el('div', { class: 'pricing-intro' },
+    el('h1', {}, 'Pick the plan that fits your business'),
+    el('p', {}, 'Switch tiers any time. All plans include multi-model content review, calendar automation, and the lead CRM.'),
+  );
+
+  // Monthly / Yearly toggle. Yearly is 10× monthly (≈ 2 months free).
+  let interval = 'monthly';
+  const monthlyBtn = el('button', { class: 'pricing-toggle-btn active' }, 'Monthly');
+  const yearlyBtn  = el('button', { class: 'pricing-toggle-btn' }, 'Yearly · save ~17%');
+  const toggle = el('div', { class: 'pricing-toggle' }, monthlyBtn, yearlyBtn);
+  intro.appendChild(toggle);
+
+  root.appendChild(intro);
+
+  const grid = el('div', { class: 'pricing-grid' });
+  root.appendChild(grid);
+
+  function renderGrid() {
+    grid.innerHTML = '';
+    for (const id of ['starter', 'pro', 'agency', 'enterprise']) {
+      const p = plans[id];
+      if (!p) continue;
+      grid.appendChild(renderPricingCardFull(p, interval, billing));
+    }
+  }
+  monthlyBtn.addEventListener('click', () => {
+    interval = 'monthly';
+    monthlyBtn.classList.add('active'); yearlyBtn.classList.remove('active');
+    renderGrid();
+  });
+  yearlyBtn.addEventListener('click', () => {
+    interval = 'yearly';
+    yearlyBtn.classList.add('active'); monthlyBtn.classList.remove('active');
+    renderGrid();
+  });
+  renderGrid();
+};
+
+function renderPricingCardFull(plan, interval, billing) {
+  const isYearly = interval === 'yearly';
+  const price = isYearly ? plan.priceYearlyGbp : plan.priceMonthlyGbp;
+  const periodLabel = isYearly ? '/yr' : '/mo';
+  const isCurrent = billing && billing.plan === plan.id;
+  const isEnterprise = plan.id === 'enterprise';
+
+  const card = el('div', {
+    class: 'pricing-card' + (plan.id === 'pro' ? ' pricing-card-featured' : '') + (isCurrent ? ' pricing-card-current' : ''),
+  });
+
+  if (plan.id === 'pro') card.appendChild(el('div', { class: 'pricing-badge' }, 'Most popular'));
+  if (isCurrent)         card.appendChild(el('div', { class: 'pricing-badge pricing-badge-current' }, 'Your plan'));
+
+  card.appendChild(el('div', { class: 'pricing-card-name' }, plan.name));
+
+  const priceBlock = el('div', { class: 'pricing-card-price' });
+  if (isEnterprise) {
+    priceBlock.appendChild(el('span', { class: 'pricing-card-price-amount' }, 'Custom'));
+  } else if (price === 0 || price == null) {
+    priceBlock.appendChild(el('span', { class: 'pricing-card-price-amount' }, 'Free'));
+  } else {
+    priceBlock.appendChild(el('span', { class: 'pricing-card-price-amount' }, '£' + price));
+    priceBlock.appendChild(el('span', { class: 'pricing-card-price-period' }, periodLabel));
+  }
+  card.appendChild(priceBlock);
+
+  card.appendChild(el('ul', { class: 'pricing-card-list' },
+    el('li', {}, formatQuota(plan.quotas.posts)    + ' posts / month'),
+    el('li', {}, formatQuota(plan.quotas.ai_calls) + ' AI calls / month'),
+    el('li', {}, formatQuota(plan.quotas.leads)    + ' leads / month'),
+    el('li', {}, formatQuota(plan.features.socials) + ' connected socials'),
+    plan.features.video > 0 || plan.features.video === -1
+      ? el('li', {}, formatQuota(plan.features.video) + ' AI videos / month')
+      : null,
+    plan.features.seats > 1 || plan.features.seats === -1
+      ? el('li', {}, formatQuota(plan.features.seats) + ' team seats')
+      : null,
+    plan.features.white_label ? el('li', {}, 'White-label / custom domain') : null,
+    plan.features.sso         ? el('li', {}, 'SSO + SAML')                  : null,
+    plan.features.sla         ? el('li', {}, 'SLA + dedicated VM')          : null,
+  ));
+
+  let cta;
+  if (isEnterprise) {
+    cta = el('a', {
+      class: 'btn btn-ghost btn-block',
+      href: 'mailto:sales@hitrapost.co.uk?subject=Enterprise%20pricing',
+    }, 'Contact sales');
+  } else if (isCurrent) {
+    cta = el('button', {
+      class: 'btn btn-ghost btn-block',
+      onclick: openCustomerPortal,
+    }, 'Manage subscription');
+  } else {
+    cta = el('button', {
+      class: 'btn btn-primary btn-block',
+      onclick: () => startCheckout(plan.id, interval),
+    }, billing ? `Upgrade to ${plan.name}` : `Start with ${plan.name}`);
+  }
+  card.appendChild(cta);
+
+  return card;
+}
+
+// ---- Render the Billing card inside the Settings view -------------------
+async function renderBillingCard(parent, myGen) {
+  const card = el('div', { class: 'card', style: 'margin-top:20px' });
+  card.appendChild(el('div', { class: 'section-header' },
+    el('h2', {}, 'Billing'),
+    el('div', { class: 'section-sub' }, 'Plan, usage, and invoices.'),
+  ));
+  const body = el('div');
+  card.appendChild(body);
+  parent.appendChild(card);
+
+  body.innerHTML = '<div class="loading"></div>';
+  let billing;
+  try { billing = await api('/api/billing/me'); }
+  catch (e) { body.innerHTML = `<div class="auth-error show">${e.message}</div>`; return; }
+  if (stale(myGen)) return;
+
+  body.innerHTML = '';
+
+  // Plan summary
+  const planLabel = billing.planName + (billing.planStatus === 'trialing' ? ' (trial)' : '');
+  body.appendChild(el('div', { class: 'billing-plan-row' },
+    el('div', { class: 'billing-plan-name' }, planLabel),
+    el('div', { class: 'billing-plan-status', dataset: { status: billing.planStatus } },
+      billing.planStatus.replace('_', ' ')),
+  ));
+
+  if (billing.inTrial && billing.trialEndsAt) {
+    const days = Math.ceil((new Date(billing.trialEndsAt) - Date.now()) / (24 * 3600 * 1000));
+    body.appendChild(el('div', { class: 'billing-trial-banner' },
+      `Trial ends in ${days} day${days === 1 ? '' : 's'} — your card will be charged for ${billing.planName} on ${new Date(billing.trialEndsAt).toLocaleDateString()}.`));
+  }
+
+  // Usage bars
+  const usageWrap = el('div', { class: 'usage-bars' });
+  for (const metric of ['posts', 'ai_calls', 'leads']) {
+    const used  = billing.usage[metric] || 0;
+    const limit = billing.quotas[metric];
+    usageWrap.appendChild(renderUsageBar(metric, used, limit));
+  }
+  body.appendChild(usageWrap);
+
+  // Action row
+  const actions = el('div', { class: 'form-actions', style: 'margin-top:16px' });
+  if (billing.stripeCustomerId) {
+    actions.appendChild(el('button', { class: 'btn', onclick: openCustomerPortal }, 'Manage card & invoices'));
+  }
+  actions.appendChild(el('a', {
+    class: 'btn btn-primary',
+    href: '#pricing',
+    onclick: (e) => { e.preventDefault(); navigate('pricing'); },
+  }, billing.plan === 'free' || billing.plan === 'starter' ? 'See plans' : 'Change plan'));
+  body.appendChild(actions);
+
+  if (!billing.stripeConfigured) {
+    body.appendChild(el('div', { class: 'billing-warning', style: 'margin-top:12px' },
+      'Billing is not yet live in this environment. Plan upgrades will return 503 until Stripe is configured.'));
+  }
+}
+
+function renderUsageBar(metric, used, limit) {
+  const label = ({ posts: 'Posts', ai_calls: 'AI calls', leads: 'Leads' })[metric] || metric;
+  const unlimited = limit === -1;
+  const pct = unlimited ? 0 : Math.min(100, Math.round((used / Math.max(1, limit)) * 100));
+  const danger = pct >= 90;
+  const warn   = pct >= 70 && pct < 90;
+  const cls    = 'usage-bar-fill' + (danger ? ' danger' : warn ? ' warn' : '');
+
+  return el('div', { class: 'usage-bar' },
+    el('div', { class: 'usage-bar-row' },
+      el('span', { class: 'usage-bar-label' }, label),
+      el('span', { class: 'usage-bar-val' },
+        unlimited ? `${used} used` : `${used} / ${formatQuota(limit)}`),
+    ),
+    unlimited ? null : el('div', { class: 'usage-bar-track' },
+      el('div', { class: cls, style: `width:${pct}%` })),
+  );
+}
+
 (async function main() {
   const ok = await loadSession();
   if (ok) await bootApp();

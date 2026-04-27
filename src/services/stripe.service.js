@@ -94,8 +94,11 @@ async function createCheckoutSession({ org, user, plan, interval }) {
     automatic_tax: { enabled: true },
     customer_update: { address: 'auto', name: 'auto' },
     tax_id_collection: { enabled: true },
-    success_url: publicUrl('/?billing=success&session_id={CHECKOUT_SESSION_ID}'),
-    cancel_url: publicUrl('/pricing?billing=canceled'),
+    // SPA is hash-routed, so the route lives in the fragment. Stripe will
+    // append CHECKOUT_SESSION_ID after the existing query string before the
+    // fragment, which keeps the hash stable.
+    success_url: publicUrl('/?billing=success&session_id={CHECKOUT_SESSION_ID}#dashboard'),
+    cancel_url:  publicUrl('/?billing=canceled#pricing'),
     metadata: {
       org_id: org.id,
       plan,
