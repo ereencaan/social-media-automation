@@ -9,6 +9,7 @@
 // when it leaks.
 
 const express = require('express');
+const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 const router = express.Router();
 const intake = require('../services/intake.service');
@@ -27,6 +28,55 @@ const intakeLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Rate limit exceeded' },
+});
+
+// Tawk signs each webhook with HMAC-SHA1(rawBody, webhookSecret) hex in
+// the X-Tawk-Signature header. The secret is set per-webhook in the Tawk
+// dashboard. We accept TAWK_WEBHOOK_SECRET as a single-tenant env var for
+// now; per-org secrets can come later when we land multi-tenant config.
+// If no secret is configured, signatures are not enforced — fine for the
+// first-run / dogfood phase, but log a warning so we don't forget.
+let warnedTawkNoSecret = false;
+function verifyTawkSignature(req) {
+  const secret = process.env.TAWK_WEBHOOK_SECRET;
+  if (!secret) {
+    if (!warnedTawkNoSecret) {
+      console.warn('[TawkWebhook] TAWK_WEBHOOK_SECRET not set — accepting unsigned webhooks');
+      warnedTawkNoSecret = true;
+    }
+    return true;
+  }
+  const sig = req.get('X-Tawk-Signature');
+  if (!sig) return false;
+  const raw = req.rawBody || Buffer.from('');
+  const expected = crypto.createHmac('sha1', secret).update(raw).digest('hex');
+  if (sig.length !== expected.length) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(expected, 'hex'));
+  } catch {
+    return false;
+  }
+}
+
+// Tawk-specific intake. Tawk's payload is nested (visitor.name, visitor.email,
+// chatId, event) and the generic /:token normalizer can't reach those fields,
+// so we route Tawk to a dedicated handler that maps the shape and stamps
+// source: 'tawk_livechat'.
+router.post('/tawk/:token', intakeLimiter, (req, res) => {
+  try {
+    const org = intake.getOrgByToken(req.params.token);
+    if (!org) return res.status(404).json({ error: 'Invalid intake token' });
+    if (!verifyTawkSignature(req)) {
+      return res.status(401).json({ error: 'Invalid signature' });
+    }
+    const lead = intake.ingestTawk(org.id, req.body || {});
+    // Always 200 on accepted-but-no-lead so Tawk doesn't retry chat:end etc.
+    if (!lead) return res.status(200).json({ ok: true, ignored: true });
+    res.status(201).json({ ok: true, leadId: lead.id });
+  } catch (err) {
+    const status = err.status || 400;
+    res.status(status).json({ error: err.message });
+  }
 });
 
 router.post('/:token', intakeLimiter, (req, res) => {

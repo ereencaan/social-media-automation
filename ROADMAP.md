@@ -116,10 +116,22 @@
 - [x] Source chips: instagram / facebook / linkedin / webhook / manual
 - [x] Lead drawer with AI email draft
 
-### Tidio (live chat) — quick wins
-- [~] Tidio chatbot flow with "Send Webhook" action → `/api/intake/:token` (docs in docs/integrations/live-chat.md; user wires it in Tidio)
-- [x] Add `tidio_livechat` source chip + icon
-- [x] Document: "Connect Tidio in 5 minutes" guide (docs/integrations/live-chat.md)
+### Live chat — Tawk.to (primary, free + webhooks on free tier)
+- [x] `POST /api/intake/tawk/:token` handler with HMAC-SHA1 signature verify (`TAWK_WEBHOOK_SECRET`)
+- [x] Tawk payload mapping (chat:start / chat:transcript / ticket:create → lead, chat:end ignored)
+- [x] `tawk` source chip (uses canonical `tawk` id, see SOURCE_META)
+- [x] Anonymous-visitor filter (skip Tawk auto-names like "Visitor 1234567890")
+- [x] Hitratech.co.uk: Tidio swapped for Tawk (dogfood)
+- [ ] Settings → "Connect Tawk in 5 minutes" guide card with intake URL
+- [ ] Per-org webhook secret (replace single env var when multi-tenant lands)
+
+### Live chat — Tidio
+> **Free tier blocks "Send Webhook" action (Plus required).** For free Tidio
+> users we route via email-to-lead instead. Direct webhook handler skipped
+> until/unless a Plus customer asks for it.
+- [~] (Plus only) Generic `/api/intake/:token` mapping; user wires "Send Webhook" in Tidio Flows (docs in docs/integrations/live-chat.md)
+- [x] `tidio_livechat` source chip + icon
+- [x] "Connect Tidio in 5 minutes" guide (docs/integrations/live-chat.md)
 
 ### WordPress connector (own brand + sellable to customers)
 - [x] Custom WP plugin: `Hitrapost Connector`
@@ -141,10 +153,17 @@
 - [x] `tawk` / `crisp` chips
 - [x] `email` chip (forwarding-based, see P3.email)
 
-### Email-to-lead (later, requires SMTP+IMAP)
-- [ ] Per-org forwarding address (`leads-{orgToken}@hitrapost.co.uk`)
-- [ ] IMAP poller / Postfix pipe → POST to intake
-- [ ] Parse name/email/subject → lead
+### Email-to-lead (universal channel — solves Tidio free, Crisp free, all form-notification emails, direct customer mails)
+- [x] `email` source chip + amber color (frontend placeholder; handler not wired yet)
+- [ ] Inbound provider: SendGrid Inbound Parse (free tier) — DNS: `MX leads.hitrapost.co.uk → mx.sendgrid.net`
+- [ ] `POST /api/intake/email` endpoint receives multipart from SendGrid, extracts `to` token
+- [ ] `email-parser.service.js` — name/phone/message heuristics + From-header source detection
+  - `notifications@tidio.com` → `tidio_livechat`
+  - `noreply@tawk.to` → `tawk_livechat`
+  - `wordpress@*` / form plugin patterns → `wordpress_form`
+  - generic → `email`
+- [ ] Per-org forwarding address: `{intake_token}@leads.hitrapost.co.uk`
+- [ ] Settings → "Email-to-Lead Address" reveal card + Tidio/Gmail forward setup guide
 
 ### Meta App Review (UNBLOCKS real IG/FB DM ingest)
 - [!] App icon 1024×1024

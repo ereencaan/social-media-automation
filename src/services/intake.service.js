@@ -136,8 +136,79 @@ function ingest(orgId, rawBody) {
   return lead;
 }
 
+// ---- Tawk.to webhook ingest --------------------------------------------
+//
+// Tawk fires several event types per chat:
+//   chat:start        — visitor sent first message (pre-chat survey already
+//                       filled if enabled); body has visitor + first message
+//   chat:end          — chat closed (no new lead info)
+//   chat:transcript   — full transcript after end; body has messages[]
+//   ticket:create     — offline form submitted; body has ticket fields
+// We turn chat:start, chat:transcript, ticket:create into leads (deduped on
+// chatId/ticketId via leads.source_ref). Other events are accepted with 200
+// to keep Tawk from retrying.
+function ingestTawk(orgId, body = {}) {
+  const event = body.event;
+  if (!event) return null;
+  if (!['chat:start', 'chat:transcript', 'ticket:create'].includes(event)) {
+    return null; // accepted but no lead produced
+  }
+
+  const visitor = body.visitor || (body.ticket && body.ticket.visitor) || {};
+  // Tawk auto-generates names like "Visitor 1234567890" when no pre-chat
+  // survey is configured — treat those as "no name".
+  const rawName = visitor.name ? String(visitor.name).trim() : null;
+  const name = rawName && !/^Visitor\s+\d+$/i.test(rawName) ? rawName : null;
+  const email = visitor.email ? String(visitor.email).trim() : null;
+  const phone = visitor.phone ? String(visitor.phone).trim() : null;
+
+  let message = null;
+  if (event === 'chat:start') {
+    if (typeof body.message === 'string') message = body.message;
+    else if (body.message && body.message.text) message = body.message.text;
+  } else if (event === 'chat:transcript' && Array.isArray(body.messages)) {
+    message = body.messages
+      .map((m) => {
+        const who = m && m.sender && m.sender.t === 'a' ? 'agent' : 'visitor';
+        const text = m && (m.msg || m.text) ? (m.msg || m.text) : '';
+        return `${who}: ${text}`;
+      })
+      .filter(Boolean)
+      .join('\n');
+  } else if (event === 'ticket:create') {
+    const t = body.ticket || body;
+    const subject = t.subject || null;
+    const ticketMsg = t.message || t.body || null;
+    message = [subject, ticketMsg].filter(Boolean).join('\n');
+  }
+
+  // Need at least one identifier to create a lead. Anonymous chats with no
+  // contact info are accepted but skipped (Tawk still gets 200).
+  if (!name && !email && !phone) return null;
+
+  const sourceRef = body.chatId
+    || (body.ticket && body.ticket.id)
+    || body.ticketId
+    || null;
+
+  const lead = leadsService.createLead(orgId, {
+    source:    'tawk',
+    sourceRef,
+    name, email, phone,
+    notes:     message,
+  });
+
+  leadsService.addActivity(orgId, lead.id, null, {
+    type: 'message',
+    content: message || '(no message)',
+    metadata: { tawk: true, event, payload: body },
+  });
+
+  return lead;
+}
+
 module.exports = {
   getOrgByToken, getOrCreateToken, regenerateToken,
-  normalizePayload, canonicalSource, ingest,
+  normalizePayload, canonicalSource, ingest, ingestTawk,
   SOURCE_ALIASES,
 };
