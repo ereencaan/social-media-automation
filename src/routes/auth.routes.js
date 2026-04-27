@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const { register, login } = require('../services/auth.service');
+const { register, login, verifyEmailToken, resendVerificationEmail } = require('../services/auth.service');
 const { requireAuth } = require('../middleware/auth');
-const { loginLimiter, registerLimiter, twoFaLimiter } = require('../middleware/rate-limit');
+const { loginLimiter, registerLimiter, twoFaLimiter, dailySignupLimiter } = require('../middleware/rate-limit');
 const totp = require('../services/totp.service');
 
 // Regenerate session to prevent fixation, then set userId.
@@ -17,10 +17,36 @@ function startSession(req, res, user, status) {
   });
 }
 
-router.post('/register', registerLimiter, async (req, res) => {
+// Two limiters: the hourly burst limiter + the 24h daily ceiling. Both must
+// pass. The daily one stops slow drips that the hourly one wouldn't catch.
+router.post('/register', dailySignupLimiter, registerLimiter, async (req, res) => {
   try {
     const user = await register(req.body);
     startSession(req, res, user, 200);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---- Email verification --------------------------------------------------
+// GET /api/auth/verify-email?token=xxx
+//   Public. Successful verification redirects to the app with a toast hint.
+//   Failed verification renders a plain text error so we don't loop the user
+//   on a stale link.
+router.get('/verify-email', (req, res) => {
+  const token = String(req.query?.token || '').trim();
+  if (!token) return res.status(400).send('Missing token');
+  const ok = verifyEmailToken(token);
+  if (!ok) return res.status(400).send('This verification link is invalid or expired. Sign in and request a new one.');
+  // Land back on the dashboard with a hint the SPA can toast.
+  res.redirect('/?verified=1');
+});
+
+// POST /api/auth/verify-email/resend (authenticated)
+router.post('/verify-email/resend', requireAuth, async (req, res) => {
+  try {
+    const out = await resendVerificationEmail(req.user.id);
+    res.json(out);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

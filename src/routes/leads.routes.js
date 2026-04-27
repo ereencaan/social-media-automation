@@ -5,6 +5,7 @@ const intake = require('../services/intake.service');
 const { prepare } = require('../config/database');
 const { draftAndReview, draftEmail } = require('../services/lead-email.service');
 const { enforceQuota } = require('../middleware/billing');
+const { requireVerifiedEmail } = require('../middleware/email-verified');
 const usage = require('../services/usage.service');
 
 // All routes here assume requireAuth has already attached req.user.
@@ -89,7 +90,7 @@ router.get('/:id/activities', (req, res) => {
 // POST /api/leads/:id/emails/draft  — generate a draft + multi-model review.
 //     body: { goal?: 'intro'|'followup'|'meeting'|'reactivate'|'proposal'|'custom',
 //             extra?: string }
-router.post('/:id/emails/draft', enforceQuota('ai_calls'), async (req, res) => {
+router.post('/:id/emails/draft', requireVerifiedEmail, enforceQuota('ai_calls'), async (req, res) => {
   try {
     const lead = svc.getLead(req.user.orgId, req.params.id);
     if (!lead) return res.status(404).json({ error: 'Lead not found' });

@@ -33,6 +33,18 @@ const registerLimiter = rateLimit({
   message: { error: 'Too many signups from this IP. Try again in an hour.' },
 });
 
+// Hard ceiling on accounts created from a single IP per 24h. The hourly
+// `registerLimiter` above stops bursts; this one stops slow drips. Tuned
+// at 3 because a real household / co-working space might legit produce 2
+// accounts in a day; 4+ is almost always abuse.
+const dailySignupLimiter = rateLimit({
+  windowMs: 24 * 60 * 60 * 1000,
+  max: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Daily signup limit reached for this IP. Try again tomorrow or contact support.' },
+});
+
 const twoFaLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   max: 8,
@@ -42,4 +54,4 @@ const twoFaLimiter = rateLimit({
   skipSuccessfulRequests: true,
 });
 
-module.exports = { loginLimiter, registerLimiter, twoFaLimiter };
+module.exports = { loginLimiter, registerLimiter, twoFaLimiter, dailySignupLimiter };

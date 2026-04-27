@@ -18,6 +18,7 @@ const { generateId } = require('../utils/helpers');
 const { planMonth } = require('../services/content-planner.service');
 const { generatePlanItemNow, publishPlanItemNow } = require('../services/scheduler.service');
 const { enforceQuota } = require('../middleware/billing');
+const { requireVerifiedEmail } = require('../middleware/email-verified');
 const usage = require('../services/usage.service');
 
 function getOwnedPlan(id, orgId) {
@@ -44,7 +45,7 @@ function presentItem(it) {
 // Counts as one ai_call (Claude generates the month brief). The actual
 // per-item generation later goes through generate-now / cron, which each
 // hit /generate or generate-template — those are quota-gated independently.
-router.post('/preview', enforceQuota('ai_calls'), async (req, res) => {
+router.post('/preview', requireVerifiedEmail, enforceQuota('ai_calls'), async (req, res) => {
   try {
     const {
       month, targetCount, mode = 'hybrid',

@@ -61,33 +61,33 @@
 - [ ] Stripe Customer Portal config (cancel, update card, invoices)
 
 ### Backend
-- [ ] DB migration: `orgs.plan`, `plan_status`, `trial_ends_at`, `stripe_customer_id`, `stripe_subscription_id`
-- [ ] DB migration: `usage_counters` (org_id, period_month, posts_created, ai_calls_count, leads_count)
-- [ ] Middleware: `requirePlan('pro')`
-- [ ] Middleware: `enforceQuota('posts' | 'ai_calls' | 'leads')`
-- [ ] Cron: monthly `usage_counters` reset on 1st of each month
-- [ ] `POST /api/billing/checkout` — Stripe Checkout session for plan
-- [ ] `POST /api/billing/portal` — Stripe Customer Portal session
-- [ ] `POST /webhooks/stripe` — signature verify + event dispatch
-  - [ ] `customer.subscription.created/updated/deleted` → DB sync
-  - [ ] `invoice.paid` → reset quotas, mark active
-  - [ ] `invoice.payment_failed` → mark `past_due`, notify
-  - [ ] `customer.subscription.trial_will_end` → email reminder
+- [x] DB migration: `orgs.plan`, `plan_status`, `trial_ends_at`, `stripe_customer_id`, `stripe_subscription_id`
+- [x] DB migration: `usage_counters` (org_id, period_month, posts_created, ai_calls_count, leads_count)
+- [x] Middleware: `requirePlan('pro')`
+- [x] Middleware: `enforceQuota('posts' | 'ai_calls' | 'leads')`
+- [x] Cron: monthly `usage_counters` reset on 1st of each month
+- [x] `POST /api/billing/checkout` — Stripe Checkout session for plan
+- [x] `POST /api/billing/portal` — Stripe Customer Portal session
+- [x] `POST /webhooks/stripe` — signature verify + event dispatch
+  - [x] `customer.subscription.created/updated/deleted` → DB sync
+  - [x] `invoice.paid` → reset quotas, mark active
+  - [x] `invoice.payment_failed` → mark `past_due`, notify
+  - [~] `customer.subscription.trial_will_end` → email reminder (handler in place; email send TBD)
 
 ### Frontend
-- [ ] `/pricing` page (4 plan cards, monthly/annual toggle)
-- [ ] Settings → **Billing** tab (current plan, usage bars, invoices, cancel)
-- [ ] Limit-aspect modal — "You've used 28/30 posts this month"
-- [ ] Upgrade CTAs on quota exceed (402 Payment Required → modal)
-- [ ] Usage indicator on Dashboard (posts / AI calls / leads remaining)
+- [x] `/pricing` page (4 plan cards, monthly/annual toggle)
+- [x] Settings → **Billing** tab (current plan, usage bars, invoices, cancel)
+- [x] Limit-aspect modal — "You've used 28/30 posts this month"
+- [x] Upgrade CTAs on quota exceed (402 Payment Required → modal)
+- [x] Usage indicator on Dashboard (posts / AI calls / leads remaining)
 
 ### Anti-abuse (signup hardening)
-- [ ] SMTP provider integration (Resend recommended — 3000/mo free)
-- [ ] Email verification: signup → token email → verify-only AI gate
-- [ ] Disposable email blocklist (mailcheck.io regex + curated list)
-- [ ] IP rate: max 3 accounts per IP per 24h
-- [ ] 14-day trial: Stripe SetupIntent for card auth (no charge)
-- [ ] Trial countdown banner (last 3 days)
+- [x] SMTP provider integration (Resend recommended — 3000/mo free)
+- [x] Email verification: signup → token email → verify-only AI gate
+- [x] Disposable email blocklist (mailcheck.io regex + curated list)
+- [x] IP rate: max 3 accounts per IP per 24h
+- [x] 14-day trial: Stripe SetupIntent for card auth (no charge)
+- [x] Trial countdown banner (last 3 days)
 
 ---
 

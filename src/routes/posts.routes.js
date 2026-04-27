@@ -15,11 +15,17 @@ const { generateVideo, generateVideoFromImage } = require('../services/runway.se
 const { applyImageOverlay, applyVideoOverlay } = require('../services/overlay.service');
 const { schedulePost, cancelSchedule, publishPost } = require('../services/scheduler.service');
 const { enforceQuota, requirePlan } = require('../middleware/billing');
+const { requireVerifiedEmail } = require('../middleware/email-verified');
 const usage = require('../services/usage.service');
 
 // Generate content with AI (DALL-E + Claude)
 // Quota: counts as 1 post + 1 ai_call. Both must be under the plan limit.
-router.post('/generate', enforceQuota('posts'), enforceQuota('ai_calls'), async (req, res) => {
+// Verified email required — see middleware/email-verified.js.
+router.post('/generate',
+  requireVerifiedEmail,
+  enforceQuota('posts'),
+  enforceQuota('ai_calls'),
+  async (req, res) => {
   try {
     const { prompt, platforms = ['instagram'], onBrand = true, variants = 1, qualityGate = true } = req.body;
     if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
@@ -52,6 +58,7 @@ router.post('/generate', enforceQuota('posts'), enforceQuota('ai_calls'), async 
 // Generate video/reel with AI (Runway + Claude)
 // Pro+ only — video generation is bundled into the higher tiers.
 router.post('/generate-video',
+  requireVerifiedEmail,
   requirePlan('pro'),
   enforceQuota('posts'),
   enforceQuota('ai_calls'),
@@ -118,7 +125,11 @@ router.post('/generate-video',
 });
 
 // Generate from Templated.io template
-router.post('/generate-template', enforceQuota('posts'), enforceQuota('ai_calls'), async (req, res) => {
+router.post('/generate-template',
+  requireVerifiedEmail,
+  enforceQuota('posts'),
+  enforceQuota('ai_calls'),
+  async (req, res) => {
   try {
     const { prompt, templateId, layers = {}, platforms = ['instagram'], format = 'jpg', onBrand = true } = req.body;
     if (!templateId) return res.status(400).json({ error: 'templateId is required' });
@@ -194,7 +205,7 @@ router.get('/templates', async (req, res) => {
 });
 
 // ---- Prompt pre-analysis (fast, single-model Claude by default) ---------
-router.post('/analyze-prompt', enforceQuota('ai_calls'), async (req, res) => {
+router.post('/analyze-prompt', requireVerifiedEmail, enforceQuota('ai_calls'), async (req, res) => {
   try {
     const { prompt, platforms = ['instagram'], models } = req.body || {};
     if (!prompt || !String(prompt).trim()) {
@@ -211,7 +222,7 @@ router.post('/analyze-prompt', enforceQuota('ai_calls'), async (req, res) => {
 });
 
 // ---- Rewrite a prompt using suggestions + business profile -------------
-router.post('/rewrite-prompt', enforceQuota('ai_calls'), async (req, res) => {
+router.post('/rewrite-prompt', requireVerifiedEmail, enforceQuota('ai_calls'), async (req, res) => {
   try {
     const { prompt, platforms = ['instagram'], suggestions = [] } = req.body || {};
     if (!prompt || !String(prompt).trim()) {
@@ -230,7 +241,7 @@ router.post('/rewrite-prompt', enforceQuota('ai_calls'), async (req, res) => {
 // ---- Regenerate copy for an existing post, applying quality suggestions --
 // Replaces caption/hashtags/platformCaptions in-place. Image is NOT
 // regenerated (that's a separate, expensive call the user can trigger).
-router.post('/:id/regenerate-copy', enforceQuota('ai_calls'), async (req, res) => {
+router.post('/:id/regenerate-copy', requireVerifiedEmail, enforceQuota('ai_calls'), async (req, res) => {
   try {
     const post = getOwnedPost(req.params.id, req.user.orgId);
     if (!post) return res.status(404).json({ error: 'Post not found' });

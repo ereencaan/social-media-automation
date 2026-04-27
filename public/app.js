@@ -237,21 +237,29 @@ async function bootApp() {
   // Stripe redirect handling: success / cancel land back here with a query
   // param. We toast the result and strip the param so a refresh doesn't
   // re-fire it.
-  if (location.search.includes('billing=')) {
+  if (location.search.includes('billing=') || location.search.includes('verified=')) {
     const q = new URLSearchParams(location.search);
-    const status = q.get('billing');
-    if (status === 'success') {
+    const billingStatus = q.get('billing');
+    if (billingStatus === 'success') {
       toast('Subscription active. Welcome aboard!', 'success', 6000);
       // Bust the cached billing/me — server has already synced from the
       // webhook by the time the redirect lands, but the cached value the
       // dashboard fetched at boot will be stale.
       _plansCache = null;
-    } else if (status === 'canceled') {
+    } else if (billingStatus === 'canceled') {
       toast('Checkout canceled. No charge.', 'info');
+    }
+    if (q.get('verified') === '1') {
+      toast('Email verified. AI generation unlocked.', 'success', 5000);
+      State.user.emailVerified = true;
     }
     // Strip the query string while preserving the hash route.
     history.replaceState(null, '', location.pathname + location.hash);
   }
+
+  // Verify-email banner — persistent reminder until the user clicks the link
+  // in their inbox. We hide it when verified.
+  renderVerifyBanner();
 
   // Route from hash or default
   const initialRoute = (location.hash.replace('#', '') || 'dashboard');
@@ -2928,6 +2936,53 @@ function formatDate(s, { dateOnly = false } = {}) {
 // =======================================================================
 //   BOOTSTRAP
 // =======================================================================
+// =======================================================================
+//   EMAIL VERIFICATION BANNER
+// =======================================================================
+// Persistent top-of-app banner shown until the user clicks the verify link.
+// AI routes 403 with code='email_unverified' for unverified users; this
+// banner is the user's hint that the gate exists. "Resend" calls the new
+// /api/auth/verify-email/resend endpoint.
+function renderVerifyBanner() {
+  const existing = document.getElementById('verify-email-banner');
+  if (State.user?.emailVerified) {
+    if (existing) existing.remove();
+    return;
+  }
+  if (existing) return; // already shown
+  if (!State.user) return;
+
+  const main = document.querySelector('.main');
+  if (!main) return;
+
+  const banner = el('div', { id: 'verify-email-banner', class: 'verify-banner' },
+    el('span', {},
+      'Verify your email to unlock AI generation. We sent a link to ',
+      el('strong', {}, State.user.email),
+      '.'),
+    el('button', {
+      class: 'btn btn-sm',
+      onclick: async (ev) => {
+        ev.target.disabled = true;
+        try {
+          const out = await api('/api/auth/verify-email/resend', { method: 'POST' });
+          if (out.alreadyVerified) {
+            toast('Email already verified.', 'success');
+            State.user.emailVerified = true;
+            renderVerifyBanner();
+          } else {
+            toast('Verification email sent.', 'success');
+          }
+        } catch (e) {
+          toast(e.message, 'error');
+          ev.target.disabled = false;
+        }
+      },
+    }, 'Resend'),
+  );
+  main.insertBefore(banner, main.firstChild);
+}
+
 // =======================================================================
 //   BILLING — pricing view, upgrade modal, usage bars
 // =======================================================================
