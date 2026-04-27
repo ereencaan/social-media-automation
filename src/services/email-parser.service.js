@@ -85,6 +85,11 @@ function detectSource({ fromAddress, subject = '', text = '' }) {
 //   jane@example.com
 // We split into displayName + address. If displayName is absent we leave
 // it null and let the caller fall back to the local-part guess.
+// We preserve case on the local-part because our per-org intake tokens
+// are mixed-case base64url (e.g. "4rcamU1qxByQ...") and lowercasing the
+// whole address would break token lookup. Domains are case-insensitive
+// in RFC 5321 anyway, but callers that need to compare them lowercase
+// the domain side themselves.
 function parseAddress(raw) {
   if (!raw || typeof raw !== 'string') return { displayName: null, address: null };
   const s = raw.trim();
@@ -94,12 +99,12 @@ function parseAddress(raw) {
     const display = m[1].trim();
     return {
       displayName: display || null,
-      address: m[2].trim().toLowerCase(),
+      address: m[2].trim(),
     };
   }
   // Bare address.
   if (s.includes('@')) {
-    return { displayName: null, address: s.toLowerCase() };
+    return { displayName: null, address: s };
   }
   return { displayName: null, address: null };
 }
@@ -196,7 +201,10 @@ function extractToken(toRaw, expectedDomain) {
   for (const r of recipients) {
     const { address } = parseAddress(r);
     if (!address) continue;
-    const [local, domain] = address.split('@');
+    const atIdx = address.lastIndexOf('@');
+    if (atIdx < 0) continue;
+    const local = address.slice(0, atIdx);     // preserve token case
+    const domain = address.slice(atIdx + 1);
     if (!local || !domain) continue;
     if (wantDomain && domain.toLowerCase() !== wantDomain) continue;
     return local;
