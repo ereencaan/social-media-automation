@@ -63,6 +63,26 @@
 - [x] Owner account (ereencaan@gmail.com) comped to Agency yearly active in DB (no Stripe sub, manual entitlement)
 - [x] **Privacy Policy + Terms of Service pages** — `/privacy` and `/terms` (UK GDPR + DPA 2018 grade Privacy with sub-processor table; UK SaaS B2B Terms with billing, AUP, AI disclaimers, liability cap, English law/jurisdiction). Linked from index footer; pending Stripe Customer Portal config update on user side.
 
+### Domain mailboxes (referenced in policy pages — currently UNDELIVERABLE)
+> The Privacy + Terms pages reference 5 role-based mailboxes that don't exist
+> on `hitrapost.co.uk` yet. Mail sent to them will bounce. This is a real
+> blocker for compliance: under UK GDPR Art. 13 we must provide a working
+> contact for data-subject requests within 30 days, and dispute resolution
+> via Stripe needs working `billing@`. Fix before scaling beyond dogfood.
+- [ ] Cloudflare Email Routing on `hitrapost.co.uk` root (free, unlimited aliases) — MX + TXT records added, all aliases forward to `ereencaan@gmail.com` initially
+- [ ] Set up these mandatory aliases (referenced in `/privacy` + `/terms`):
+  - [ ] `privacy@hitrapost.co.uk` → data-subject access requests, ICO escalation
+  - [ ] `billing@hitrapost.co.uk` → Stripe disputes, refund queries, VAT
+  - [ ] `security@hitrapost.co.uk` → security disclosures (referenced in Privacy §8)
+  - [ ] `legal@hitrapost.co.uk` → ToS / contract / IP queries
+  - [ ] `support@hitrapost.co.uk` → general user support
+  - [ ] `info@hitrapost.co.uk` / `hello@hitrapost.co.uk` → general inbound (already used as From-address in Resend `EMAIL_FROM` env)
+- [ ] Outbound replies — when owner needs to *reply from* `support@hitrapost.co.uk` to a customer, options:
+  - **Cheap**: Gmail "Send mail as" with SendGrid SMTP relay (free)
+  - **Clean**: Google Workspace £6/user/mo (proper inbox per alias, calendar, drive)
+  - Decision deferred until first real customer ticket arrives
+- [ ] Once aliases live, double-check Privacy + Terms pages still render the same email addresses (no code change needed — pages already reference them)
+
 ### Backend
 - [x] DB migration: `orgs.plan`, `plan_status`, `trial_ends_at`, `stripe_customer_id`, `stripe_subscription_id`
 - [x] DB migration: `usage_counters` (org_id, period_month, posts_created, ai_calls_count, leads_count)
