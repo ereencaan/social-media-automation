@@ -36,7 +36,10 @@ app.use(session({
     maxAge: 1000 * 60 * 60 * 24 * 7 // 7 days
   }
 }));
-app.use(express.static(path.join(__dirname, '../public')));
+// `extensions: ['html']` lets us link to /privacy and /terms without the
+// .html suffix. Customer-facing URLs (Stripe Customer Portal config,
+// transactional emails) stay short and readable.
+app.use(express.static(path.join(__dirname, '../public'), { extensions: ['html'] }));
 
 // Public routes
 app.use('/api/auth', require('./routes/auth.routes'));

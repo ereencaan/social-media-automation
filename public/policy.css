@@ -1,0 +1,187 @@
+/* Stylesheet shared by /privacy.html and /terms.html.
+ *
+ * The legal pages live outside the SPA — visitors land here from Stripe's
+ * Customer Portal, the landing-page footer, or external links — so they
+ * stay self-contained instead of pulling in the full app stylesheet. The
+ * dark palette here mirrors the SPA's tokens loosely; if the brand
+ * refreshes, update both. */
+
+:root {
+  --bg:           #0b0d12;
+  --surface-1:    #11141b;
+  --surface-2:    #161a23;
+  --text:         #e6e8ef;
+  --text-dim:     #98a0b3;
+  --text-mute:    #6b7385;
+  --accent:       #7c5cff;
+  --accent-soft:  rgba(124, 92, 255, 0.18);
+  --border:       rgba(255, 255, 255, 0.08);
+  --border-soft:  rgba(255, 255, 255, 0.04);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  font-weight: 400;
+  font-size: 16px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover { text-decoration: underline; }
+
+/* ---- Sticky top nav (logo + Privacy/Terms links) -------------------------
+ * Kept light-weight: no JS, no app shell. Visitors arriving from Stripe
+ * shouldn't have to wait for a 100KB SPA bundle just to read the policy. */
+.legal-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 28px;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  backdrop-filter: blur(12px);
+}
+.legal-nav-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 16px;
+}
+.legal-nav-brand img { width: 24px; height: 24px; }
+.legal-nav-links { display: flex; gap: 18px; }
+.legal-nav-links a {
+  color: var(--text-dim);
+  font-weight: 500;
+  font-size: 14px;
+}
+.legal-nav-links a[aria-current="page"] {
+  color: var(--text);
+  border-bottom: 2px solid var(--accent);
+  padding-bottom: 4px;
+}
+
+/* ---- Page body ---------------------------------------------------------- */
+.legal-page {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 56px 28px 96px;
+}
+
+.legal-page h1 {
+  font-size: 38px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  margin: 0 0 8px;
+  color: var(--text);
+}
+.legal-page h2 {
+  font-size: 22px;
+  font-weight: 600;
+  margin: 44px 0 12px;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+.legal-page h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 24px 0 8px;
+  color: var(--text);
+}
+.legal-page p,
+.legal-page li {
+  color: var(--text-dim);
+}
+.legal-page p { margin: 0 0 14px; }
+.legal-page ul {
+  padding-left: 22px;
+  margin: 0 0 16px;
+}
+.legal-page ul li { margin-bottom: 6px; }
+.legal-page strong { color: var(--text); font-weight: 600; }
+
+.legal-meta {
+  color: var(--text-mute);
+  font-size: 14px;
+  margin-bottom: 32px;
+}
+
+.legal-lede {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px 22px;
+  margin: 0 0 36px !important;
+  color: var(--text-dim);
+}
+
+/* ---- Tables (sub-processors, lawful basis matrices) -------------------- */
+.legal-page table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 24px;
+  font-size: 14px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.legal-page th,
+.legal-page td {
+  text-align: left;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border-soft);
+  vertical-align: top;
+}
+.legal-page tr:last-child th,
+.legal-page tr:last-child td {
+  border-bottom: none;
+}
+.legal-page th {
+  color: var(--text);
+  font-weight: 600;
+  background: var(--surface-2);
+  font-size: 13px;
+  letter-spacing: 0.01em;
+}
+.legal-page td { color: var(--text-dim); }
+
+/* ---- Footer ------------------------------------------------------------ */
+.legal-footer {
+  border-top: 1px solid var(--border);
+  padding: 28px 24px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-mute);
+  background: var(--surface-1);
+}
+.legal-footer a {
+  color: var(--text-dim);
+  margin: 0 4px;
+}
+.legal-footer a:hover { color: var(--text); }
+
+/* ---- Responsive -------------------------------------------------------- */
+@media (max-width: 600px) {
+  .legal-nav { padding: 12px 16px; }
+  .legal-page { padding: 36px 18px 72px; }
+  .legal-page h1 { font-size: 30px; }
+  .legal-page h2 { font-size: 19px; margin-top: 36px; }
+  .legal-page table { font-size: 13px; }
+  .legal-page th, .legal-page td { padding: 9px 10px; }
+}

@@ -61,7 +61,7 @@
 - [x] Stripe Customer Portal config (live): invoice history, customer info + Tax ID, payment methods, cancel-end-of-period with reason, plan switching across all 6 prices, prorated downgrades end-of-period
 - [x] Live webhook destination at `/webhooks/stripe` (7 events) with HMAC signature verify
 - [x] Owner account (ereencaan@gmail.com) comped to Agency yearly active in DB (no Stripe sub, manual entitlement)
-- [ ] **Privacy Policy + Terms of Service pages** — deferred but customer-facing (Stripe Customer Portal links currently null; needed before scale)
+- [x] **Privacy Policy + Terms of Service pages** — `/privacy` and `/terms` (UK GDPR + DPA 2018 grade Privacy with sub-processor table; UK SaaS B2B Terms with billing, AUP, AI disclaimers, liability cap, English law/jurisdiction). Linked from index footer; pending Stripe Customer Portal config update on user side.
 
 ### Backend
 - [x] DB migration: `orgs.plan`, `plan_status`, `trial_ends_at`, `stripe_customer_id`, `stripe_subscription_id`
