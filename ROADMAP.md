@@ -51,14 +51,17 @@
 ## P1 — Monetization (Stripe billing)
 
 ### Stripe account & products
-- [ ] Stripe account: business setup, UK Ltd., bank, Tax (UK VAT)
-- [ ] Product catalog:
-  - [ ] **Starter** £29/mo (£290/yr) — 30 posts, 500 leads, 3 socials, 100 AI calls
-  - [ ] **Pro** £79/mo (£790/yr) — 120 posts, 5000 leads, 10 socials, 500 AI calls
-  - [ ] **Agency** £199/mo (£1990/yr) — unlimited posts, 50K leads, 50 socials, 5 seats, white-label
-  - [ ] **Enterprise** custom — SLA, SSO, dedicated
-- [ ] Stripe Tax enabled
-- [ ] Stripe Customer Portal config (cancel, update card, invoices)
+- [x] Stripe account: Hitratech Solutions Ltd UK, live mode activated, Starling business account linked, Stripe Tax enabled (Software / SaaS category)
+- [x] Product catalog (live):
+  - [x] **Starter** £29/mo (£290/yr) — `price_1TRJhZAaKus3HbqLxW0VZOLt` / `price_1TRJhYAaKus3HbqLthScbbpA`
+  - [x] **Pro** £79/mo (£790/yr) — `price_1TRJhYAaKus3HbqL14bez80l` / `price_1TRJhXAaKus3HbqL7f3G4jsI`
+  - [x] **Agency** £199/mo (£1990/yr) — `price_1TRJhYAaKus3HbqLlSp77hXm` / `price_1TRJhXAaKus3HbqLZVXbkrtG`
+  - [ ] **Enterprise** custom — SLA, SSO, dedicated (frontend "Contact us" CTA only, no Stripe price)
+- [x] Stripe Tax enabled (UK VAT auto-calc on transactions)
+- [x] Stripe Customer Portal config (live): invoice history, customer info + Tax ID, payment methods, cancel-end-of-period with reason, plan switching across all 6 prices, prorated downgrades end-of-period
+- [x] Live webhook destination at `/webhooks/stripe` (7 events) with HMAC signature verify
+- [x] Owner account (ereencaan@gmail.com) comped to Agency yearly active in DB (no Stripe sub, manual entitlement)
+- [ ] **Privacy Policy + Terms of Service pages** — deferred but customer-facing (Stripe Customer Portal links currently null; needed before scale)
 
 ### Backend
 - [x] DB migration: `orgs.plan`, `plan_status`, `trial_ends_at`, `stripe_customer_id`, `stripe_subscription_id`
