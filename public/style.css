@@ -779,6 +779,60 @@ tr.clickable:hover { background: var(--surface-2); }
   color: var(--text-mute);
 }
 
+/* ---- Kanban DnD feedback ----
+ * The card itself fades while being dragged so the user sees a "ghosted"
+ * source slot, and the drop column gets an accent ring + slightly elevated
+ * background so the active target is unmistakable. */
+.lead-card[draggable="true"] {
+  cursor: grab;
+}
+.lead-card.lead-card-dragging {
+  opacity: 0.4;
+  cursor: grabbing;
+}
+.kanban-col.kanban-dragover {
+  border-color: var(--accent);
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.kanban-col.kanban-dragover .kanban-col-body {
+  /* Subtle inner highlight on the body so empty columns are still obvious
+   * drop targets when there are no cards underneath the cursor. */
+  background: rgba(124, 92, 255, 0.05);
+  border-radius: var(--radius);
+}
+
+/* ---- Dashboard 7-day activity chart ----
+ * Inline SVG chart inside a regular .card. Two series:
+ *  - leads: solid violet line + faint area fill
+ *  - posts: dashed green line, no fill (smaller-weight metric for SMBs) */
+.chart-card .activity-chart {
+  width: 100%;
+  height: 160px;
+  display: block;
+  margin-top: 10px;
+}
+.chart-legend {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-dim);
+  gap: 6px;
+}
+.chart-legend-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+.chart-legend-leads { background: #7c5cff; }
+.chart-legend-posts {
+  background: transparent;
+  border: 2px dashed #22c55e;
+  /* Border alone gives a hollow "dashed circle" cue matching the line style. */
+}
+
 /* ============================================================
    DRAWER
    ============================================================ */

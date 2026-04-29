@@ -414,6 +414,14 @@ VIEWS.dashboard = async function dashboardView(root, myGen) {
     }
   }
 
+  // 7-day activity chart — leads + posts created per day. Helps the
+  // operator spot trend changes (e.g. "campaign on Tuesday spiked leads").
+  // Inline SVG, no chart library: keeps the bundle small and the look
+  // consistent with the rest of the dark UI.
+  if (leads.length || posts.length) {
+    root.appendChild(renderActivityChart(leads, posts));
+  }
+
   // Recent leads table
   const section = el('div', { class: 'card' });
   section.appendChild(el('div', { class: 'section-header' },
@@ -448,6 +456,98 @@ VIEWS.dashboard = async function dashboardView(root, myGen) {
 
   root.appendChild(section);
 };
+
+// 7-day activity chart for the dashboard. Buckets `leads` and `posts` into
+// the last 7 calendar days (UTC) and renders two stacked-area-ish line
+// series in inline SVG. Keeps the whole thing under 100 lines so we don't
+// pull in a chart library.
+function renderActivityChart(leads, posts) {
+  const DAYS = 7;
+  const ms = 24 * 60 * 60 * 1000;
+  // Snap "today" to UTC midnight so two events on the same wall-clock day
+  // bucket together regardless of viewer timezone. The dashboard already
+  // computes "new this week" with the same boundary.
+  const todayUTC = new Date();
+  todayUTC.setUTCHours(0, 0, 0, 0);
+  const startUTC = todayUTC.getTime() - (DAYS - 1) * ms;
+
+  function bucket(items, dateKey) {
+    const out = new Array(DAYS).fill(0);
+    for (const it of items) {
+      const raw = it[dateKey];
+      if (!raw) continue;
+      // Server stores 'YYYY-MM-DD HH:MM:SS' UTC. Normalise into a Date.
+      const t = new Date(String(raw).replace(' ', 'T') + 'Z').getTime();
+      if (Number.isNaN(t)) continue;
+      const diffDays = Math.floor((t - startUTC) / ms);
+      if (diffDays < 0 || diffDays >= DAYS) continue;
+      out[diffDays]++;
+    }
+    return out;
+  }
+  const leadsByDay = bucket(leads, 'created_at');
+  const postsByDay = bucket(posts, 'created_at');
+  const peak = Math.max(1, ...leadsByDay, ...postsByDay);
+
+  // SVG layout: 600x140 viewBox. Padding leaves room for axis labels.
+  const W = 600, H = 140, PAD_X = 32, PAD_Y = 12;
+  const innerW = W - 2 * PAD_X;
+  const innerH = H - 2 * PAD_Y;
+  const stepX = innerW / (DAYS - 1);
+
+  function pointsFor(arr) {
+    return arr.map((v, i) => {
+      const x = PAD_X + i * stepX;
+      const y = PAD_Y + innerH - (v / peak) * innerH;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+  }
+
+  const dayLabel = (i) => {
+    const d = new Date(startUTC + i * ms);
+    return d.toLocaleDateString(undefined, { weekday: 'short' });
+  };
+
+  const card = el('div', { class: 'card chart-card' });
+  card.appendChild(el('div', { class: 'section-header' },
+    el('h2', {}, 'Last 7 days'),
+    el('div', { class: 'chart-legend' },
+      el('span', { class: 'chart-legend-dot chart-legend-leads' }),
+      el('span', {}, `Leads (${leadsByDay.reduce((a, b) => a + b, 0)})`),
+      el('span', { class: 'chart-legend-dot chart-legend-posts', style: 'margin-left:14px' }),
+      el('span', {}, `Posts (${postsByDay.reduce((a, b) => a + b, 0)})`),
+    ),
+  ));
+
+  // Build the SVG via string interpolation — DOM API for SVG is verbose
+  // and we don't need to bind handlers per node here.
+  const gridLines = [0.25, 0.5, 0.75].map((r) => {
+    const y = PAD_Y + innerH * r;
+    return `<line x1="${PAD_X}" y1="${y}" x2="${W - PAD_X}" y2="${y}" stroke="rgba(255,255,255,0.05)" stroke-dasharray="3,4" />`;
+  }).join('');
+  const xAxis = leadsByDay.map((_, i) => {
+    const x = PAD_X + i * stepX;
+    return `<text x="${x}" y="${H - 2}" text-anchor="middle" font-size="10" fill="#6b7280">${dayLabel(i)}</text>`;
+  }).join('');
+  const peakLabel = `<text x="${PAD_X - 4}" y="${PAD_Y + 4}" text-anchor="end" font-size="10" fill="#6b7280">${peak}</text>`;
+  const zeroLabel = `<text x="${PAD_X - 4}" y="${PAD_Y + innerH}" text-anchor="end" font-size="10" fill="#6b7280">0</text>`;
+
+  card.insertAdjacentHTML('beforeend', `
+    <svg class="activity-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Last 7 days activity">
+      ${gridLines}
+      <polyline fill="rgba(124,92,255,0.10)" stroke="none"
+        points="${PAD_X},${PAD_Y + innerH} ${pointsFor(leadsByDay)} ${W - PAD_X},${PAD_Y + innerH}" />
+      <polyline fill="none" stroke="#7c5cff" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"
+        points="${pointsFor(leadsByDay)}" />
+      <polyline fill="none" stroke="#22c55e" stroke-width="2" stroke-dasharray="4,3" stroke-linejoin="round" stroke-linecap="round"
+        points="${pointsFor(postsByDay)}" />
+      ${peakLabel}
+      ${zeroLabel}
+      ${xAxis}
+    </svg>
+  `);
+  return card;
+}
 
 // =======================================================================
 //   VIEW: LEADS (kanban)
@@ -516,24 +616,102 @@ VIEWS.leads = async function leadsView(root, myGen) {
   }
 
   const board = el('div', { class: 'kanban' });
+  // Map of status → column DOM nodes so drop handlers can move cards and
+  // update counts without a full re-render of the board (which would lose
+  // scroll position and feel laggy on slower machines).
+  const cols = {};
+
   for (const status of LEAD_STATUSES) {
     const filtered = leads.filter(l => l.status === status);
+    const countEl = el('div', { class: 'kanban-col-count' }, String(filtered.length));
+    const body    = el('div', { class: 'kanban-col-body' },
+      ...filtered.map(renderLeadCard),
+    );
     const col = el('div', { class: 'kanban-col' },
       el('div', { class: 'kanban-col-header' },
         el('div', { class: 'kanban-col-title' }, renderBadge(status)),
-        el('div', { class: 'kanban-col-count' }, String(filtered.length)),
+        countEl,
       ),
-      el('div', { class: 'kanban-col-body' },
-        ...filtered.map(renderLeadCard),
-      ),
+      body,
     );
+    col.dataset.status = status;
+    cols[status] = { col, body, countEl };
+
+    // Drop handlers — column-scoped. We accept the drop on the whole column
+    // (not just the body) so the user can release anywhere over the column,
+    // including the header and any empty space below the cards.
+    col.addEventListener('dragover', (e) => {
+      // Required to allow the drop. We also gate on a custom data type so
+      // unrelated drags (e.g. file uploads) don't trigger highlighting.
+      if (!e.dataTransfer.types.includes('application/x-hitra-lead')) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      col.classList.add('kanban-dragover');
+    });
+    col.addEventListener('dragleave', (e) => {
+      // Only clear the highlight when the cursor actually leaves the column.
+      // dragleave fires on every child boundary; relatedTarget tells us where
+      // the cursor went next.
+      if (e.relatedTarget && col.contains(e.relatedTarget)) return;
+      col.classList.remove('kanban-dragover');
+    });
+    col.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      col.classList.remove('kanban-dragover');
+      const leadId    = e.dataTransfer.getData('application/x-hitra-lead');
+      const oldStatus = e.dataTransfer.getData('text/x-hitra-lead-status');
+      if (!leadId || !oldStatus || oldStatus === status) return;
+
+      const card = document.querySelector(`.lead-card[data-lead-id="${leadId}"]`);
+      if (!card) return;
+
+      // Optimistic move: pop the card into the new column right away so the
+      // user sees the change before the API round-trips. We restore on
+      // failure. updateCounts() recomputes both counts so they stay
+      // consistent even if multiple drags interleave.
+      const oldBody = card.parentElement;
+      cols[status].body.appendChild(card);
+      card.dataset.currentStatus = status;
+      updateColumnCounts(cols);
+
+      try {
+        await api(`/api/leads/${leadId}`, { method: 'PUT', body: { status } });
+        toast(`Moved to ${status}`, 'success');
+      } catch (err) {
+        toast(err.message || 'Move failed — restored', 'error');
+        // Restore previous position. We append rather than splice into the
+        // exact original index because the DnD lift already removed it from
+        // the source list and tracking the index added complexity for
+        // little user value.
+        if (oldBody) oldBody.appendChild(card);
+        card.dataset.currentStatus = oldStatus;
+        updateColumnCounts(cols);
+      }
+    });
+
     board.appendChild(col);
   }
   root.appendChild(board);
 };
 
+// Recompute the per-column lead counts shown in the kanban headers based
+// on the live DOM. Called after every successful or reverted DnD move so
+// the badges match what the user sees on the board.
+function updateColumnCounts(cols) {
+  for (const status of Object.keys(cols)) {
+    const n = cols[status].body.querySelectorAll('.lead-card').length;
+    cols[status].countEl.textContent = String(n);
+  }
+}
+
 function renderLeadCard(lead) {
-  return el('div', { class: 'lead-card', onclick: () => openLeadDrawer(lead.id) },
+  const card = el('div', {
+    class: 'lead-card',
+    draggable: 'true',
+    'data-lead-id': lead.id,
+    'data-current-status': lead.status,
+    onclick: () => openLeadDrawer(lead.id),
+  },
     el('div', { class: 'lead-card-name' }, lead.name || '(no name)'),
     el('div', { class: 'lead-card-meta' },
       lead.email ? el('span', {}, '✉ ' + lead.email) : null,
@@ -544,6 +722,27 @@ function renderLeadCard(lead) {
       el('span', {}, formatDate(lead.created_at, { dateOnly: true })),
     ),
   );
+
+  // Drag handlers. We use a custom MIME type for the lead id so other drags
+  // on the page (logo upload, future drag-and-drop file imports) don't
+  // accidentally trigger a kanban move. The current status rides along so
+  // drop targets can short-circuit no-op drops to the same column without
+  // re-querying the DOM.
+  card.addEventListener('dragstart', (e) => {
+    e.dataTransfer.setData('application/x-hitra-lead', lead.id);
+    e.dataTransfer.setData('text/x-hitra-lead-status', card.dataset.currentStatus || lead.status);
+    e.dataTransfer.effectAllowed = 'move';
+    // Defer the dragging class so the browser captures the unblurred
+    // drag image first.
+    setTimeout(() => card.classList.add('lead-card-dragging'), 0);
+  });
+  card.addEventListener('dragend', () => {
+    card.classList.remove('lead-card-dragging');
+    document.querySelectorAll('.kanban-col.kanban-dragover')
+      .forEach((c) => c.classList.remove('kanban-dragover'));
+  });
+
+  return card;
 }
 
 // Source badge: icon + short label + colored chip so the origin channel

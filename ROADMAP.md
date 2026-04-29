@@ -242,9 +242,9 @@
 - [x] Logo iteration paused (V2 logo live)
 - [x] Quality report panel (5 axes, per-model breakdown)
 - [x] Floating background-job pill
-- [ ] Dashboard: 7-day post chart + scheduled count
+- [x] Dashboard: 7-day activity chart (leads area-line + posts dashed line, inline SVG, no chart lib)
 - [ ] Dashboard: per-platform breakdown (IG vs LI vs FB engagement)
-- [ ] Leads kanban: drag-and-drop status change
+- [x] Leads kanban: drag-and-drop status change (HTML5 DnD + custom MIME, optimistic move, server PUT, status_change activity auto-logged on success, revert on failure)
 - [ ] Posts: bulk approve / bulk schedule
 - [ ] Calendar: month / week / day views
 - [ ] Calendar: drag-to-reschedule plan items
