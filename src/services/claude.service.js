@@ -11,9 +11,13 @@ function getClient() {
 }
 
 const PLATFORM_TONES = {
-  instagram: 'casual, engaging, emoji-friendly, short and punchy',
-  facebook:  'friendly, conversational, community-oriented',
-  linkedin:  'professional, insightful, industry-focused, no excessive emojis',
+  instagram:      'casual, engaging, emoji-friendly, short and punchy',
+  facebook:       'friendly, conversational, community-oriented',
+  linkedin:       'professional, insightful, industry-focused, no excessive emojis',
+  // P4 platform expansion: Phase 1 ships content tones now so the
+  // multi-platform selector can include these even before OAuth lands.
+  tiktok:         'energetic, hook-first, very short, gen-z phrasing OK, 1–3 emojis, single trending hashtag',
+  youtube_shorts: 'clear hook in first 3 seconds, action-oriented, mid-length caption, descriptive hashtags for discovery',
 };
 
 // Build the "who we are" block that teaches Claude about the business.
@@ -34,6 +38,8 @@ function buildBusinessBlock(business) {
   if (business.instagram_handle)     lines.push(`Instagram: @${String(business.instagram_handle).replace(/^@/, '')}`);
   if (business.facebook_handle)      lines.push(`Facebook: ${business.facebook_handle}`);
   if (business.linkedin_handle)      lines.push(`LinkedIn: ${business.linkedin_handle}`);
+  if (business.tiktok_handle)        lines.push(`TikTok: @${String(business.tiktok_handle).replace(/^@/, '')}`);
+  if (business.youtube_handle)       lines.push(`YouTube: @${String(business.youtube_handle).replace(/^@/, '')}`);
   return lines.length ? lines.join('\n') : null;
 }
 

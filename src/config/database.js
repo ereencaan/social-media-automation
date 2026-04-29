@@ -163,6 +163,11 @@ async function init() {
     ['instagram_handle',     'TEXT'],
     ['facebook_handle',      'TEXT'],
     ['linkedin_handle',      'TEXT'],
+    // P4 platform expansion: Phase 1 shipped just the captures (handle on
+    // brand profile + chip on posts/calendar). Phase 2 will wire OAuth +
+    // publishing for these two.
+    ['tiktok_handle',        'TEXT'],
+    ['youtube_handle',       'TEXT'],
     ['overlay_position',     'TEXT'],
     ['primary_color',        'TEXT'],
     // Business profile — used to steer content generation

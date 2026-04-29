@@ -1605,6 +1605,21 @@ tr.clickable:hover { background: var(--surface-2); }
   margin-top: 12px; padding-top: 12px;
   border-top: 1px solid var(--border-soft);
 }
+/* P4 Phase 1: TikTok + YouTube tiles surface but the OAuth start endpoint
+ * isn't wired yet. We render this badge instead of a Connect button so the
+ * tile stays informative without misleading the user. */
+.conn-soon-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-dim);
+  border: 1px solid var(--border-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: help;
+}
 .conn-account {
   display: flex; align-items: center; gap: 10px;
   padding: 6px 8px;

@@ -205,8 +205,28 @@
 - [ ] Plugin registry — UI auto-renders connect tiles from registry
 
 ### Tier 1 (highest UK demand)
-- [ ] **TikTok** plugin (Content Posting API, OAuth, video upload, caption)
-- [ ] **YouTube Shorts** plugin (Google OAuth, video upload, Shorts metadata)
+
+**TikTok — Phase 1 shipped (UI scaffolding); Phase 2 needs developer credentials**
+- [x] `tiktok` chip on the posts multi-platform selector + calendar plans (passes through to claude.service)
+- [x] `PLATFORM_TONES.tiktok` so generated captions match the platform style (energetic, hook-first, gen-z phrasing OK)
+- [x] `tiktok_handle` on brand profile (DB column + Brand UI input + injected into buildBusinessBlock so Claude can append the handle to captions)
+- [x] Settings → Connections tile with "Coming soon" badge until Phase 2 lands
+- [ ] (Phase 2) `src/services/oauth/tiktok.oauth.js` (Login Kit authorize + token exchange)
+- [ ] (Phase 2) Content Posting API integration — `videos/upload.publish` flow with the audited "Direct Post" mode (or "Inbox" mode for unaudited apps)
+- [ ] (Phase 2) Async video status callback handling (TikTok processes uploads asynchronously)
+- [ ] (Phase 2) `TIKTOK_CLIENT_KEY` + `TIKTOK_CLIENT_SECRET` env wired
+
+**YouTube Shorts — Phase 1 shipped; Phase 2 needs Google Cloud project**
+- [x] `youtube_shorts` chip on the posts multi-platform selector + calendar plans
+- [x] `PLATFORM_TONES.youtube_shorts` (clear hook in first 3s, descriptive hashtags for discovery)
+- [x] `youtube_handle` on brand profile (DB column + Brand UI input + buildBusinessBlock injection)
+- [x] Settings → Connections tile with "Coming soon" badge
+- [ ] (Phase 2) `src/services/oauth/youtube.oauth.js` (Google OAuth, scope `youtube.upload`)
+- [ ] (Phase 2) Resumable video upload to `/upload/youtube/v3/videos` with Shorts metadata (≤60s vertical, `#Shorts` tag)
+- [ ] (Phase 2) Quota request from Google (default 10K units/day = ~6 uploads/day; need increase for production)
+- [ ] (Phase 2) `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` env wired
+- [ ] (Phase 2) Image/video render pipeline → 9:16 vertical output (currently horizontal/square; Shorts + TikTok both need this)
+
 - [ ] **WhatsApp Business Cloud** plugin (DM ingest webhook, template messages)
 - [ ] **Google Business Profile** plugin (post, review reply, Q&A)
 

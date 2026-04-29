@@ -1309,9 +1309,13 @@ VIEWS.posts = async function postsView(root, myGen) {
         (() => {
           const wrap = el('div', { class: 'chip-group' });
           [
-            ['instagram', '📷 Instagram'],
-            ['linkedin',  '💼 LinkedIn'],
-            ['facebook',  '👥 Facebook'],
+            ['instagram',      '📷 Instagram'],
+            ['linkedin',       '💼 LinkedIn'],
+            ['facebook',       '👥 Facebook'],
+            // P4 Phase 1: chip surfaces now so the operator can plan posts
+            // for these channels. Phase 2 will wire actual publishing.
+            ['tiktok',         '🎵 TikTok'],
+            ['youtube_shorts', '▶ YouTube Shorts'],
           ].forEach(([v, t], i) => {
             const id = `plat-${v}`;
             const cb = el('input', {
@@ -2570,7 +2574,11 @@ VIEWS.brand = async function brandView(root, myGen) {
     iconField('linkedin_handle',  'LinkedIn',  'hitratech',  '💼'),
   ));
   form.appendChild(row(
-    iconField('facebook_handle', 'Facebook', 'hitratech', '👥'),
+    iconField('facebook_handle',  'Facebook',  'hitratech',  '👥'),
+    iconField('tiktok_handle',    'TikTok',    '@hitratech', '🎵'),
+  ));
+  form.appendChild(row(
+    iconField('youtube_handle',   'YouTube',   '@hitratech', '▶'),
     el('div', { class: 'field' },
       el('label', {}, 'Logo overlay position',
         (() => {
@@ -3166,7 +3174,7 @@ VIEWS.settings = async function settingsView(root, myGen) {
     connBody.innerHTML = '';
 
     // Group by platform for tidy display
-    const byPlatform = { facebook: [], instagram: [], linkedin: [] };
+    const byPlatform = { facebook: [], instagram: [], linkedin: [], tiktok: [], youtube: [] };
     for (const c of creds) if (byPlatform[c.platform]) byPlatform[c.platform].push(c);
 
     const platforms = [
@@ -3176,11 +3184,30 @@ VIEWS.settings = async function settingsView(root, myGen) {
         desc: 'Publish to Facebook pages you admin.' },
       { key: 'linkedin',  label: 'LinkedIn', icon: '💼', provider: 'linkedin',
         desc: 'Post to your personal LinkedIn feed on your behalf.' },
+      // P4 Phase 1: tiles surface now, OAuth lands in Phase 2. Until env
+      // vars are set, /api/connect/{provider}/start returns 503 and we
+      // fall back to a "Coming soon" disabled state on the button.
+      { key: 'tiktok',    label: 'TikTok',   icon: '🎵', provider: 'tiktok',  comingSoon: true,
+        desc: 'Auto-publish vertical short videos to your TikTok Business account. Requires TikTok for Developers app approval.' },
+      { key: 'youtube',   label: 'YouTube Shorts', icon: '▶', provider: 'youtube', comingSoon: true,
+        desc: 'Upload AI-generated Shorts directly to your YouTube channel. Requires Google Cloud OAuth setup.' },
     ];
 
     for (const p of platforms) {
       const accts = byPlatform[p.key] || [];
       const tile = el('div', { class: 'conn-tile' });
+
+      const headRight = p.comingSoon
+        ? el('span', { class: 'conn-soon-badge', title: 'Wired in P4 Phase 2 — needs developer credentials' }, 'Coming soon')
+        : el('button', {
+            class: 'btn btn-primary btn-sm',
+            onclick: async () => {
+              try {
+                const r = await api(`/api/connect/${p.provider}/start`);
+                window.location.href = r.url;
+              } catch (err) { toast(err.message, 'error'); }
+            },
+          }, accts.length ? '+ Add another' : 'Connect');
 
       tile.appendChild(el('div', { class: 'conn-head' },
         el('span', { class: 'conn-icon' }, p.icon),
@@ -3188,15 +3215,7 @@ VIEWS.settings = async function settingsView(root, myGen) {
           el('div', { class: 'conn-title' }, p.label),
           el('div', { class: 'conn-desc' }, p.desc),
         ),
-        el('button', {
-          class: 'btn btn-primary btn-sm',
-          onclick: async () => {
-            try {
-              const r = await api(`/api/connect/${p.provider}/start`);
-              window.location.href = r.url;
-            } catch (err) { toast(err.message, 'error'); }
-          },
-        }, accts.length ? '+ Add another' : 'Connect'),
+        headRight,
       ));
 
       if (accts.length) {
