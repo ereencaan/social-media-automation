@@ -145,6 +145,99 @@ function extractPhone(text) {
   return digits;
 }
 
+// ---- Form-notification body parser --------------------------------------
+//
+// Form plugins (Contact Form 7, WPForms, Elementor Forms, Gravity, Ninja,
+// Formidable) and chat services (Tidio free-tier notifications, Tawk
+// offline tickets, Crisp, Smartsupp, LiveChat) all email the site owner
+// with the actual customer's details inside the body, while the From
+// header is the bot/plugin itself ("WordPress <wordpress@site.com>",
+// "Tidio <notifications@tidio.com>"). Parsing the From header for these
+// gives us a lead named "WordPress" or "Tidio" — useless. Instead we
+// look for labelled fields in the body:
+//
+//   Name: Mike Brown
+//   First Name: Mike       (combined with Last Name when both present)
+//   Last Name: Brown
+//   Email: mike@x.io
+//   Phone: 07700 111 222
+//   Visitor: Sarah Holmes  (Tidio / Crisp pattern)
+//   Sender: ...            (Tawk pattern)
+//
+// The labels are matched case-insensitively at line starts, allowing
+// `:` or `=` separators to handle both human-readable and form-encoded
+// notification styles. If nothing is found we return null and the caller
+// falls back to header-based heuristics (or skips the lead).
+const FORM_LABEL = {
+  name: /^[ \t]*(?:full[ \t]+name|your[ \t]+name|contact[ \t]+name|customer[ \t]+name|visitor(?:[ \t]+name)?|sender(?:[ \t]+name)?|lead(?:[ \t]+name)?|name)[ \t]*[:=][ \t]*(.+?)[ \t]*$/im,
+  firstName: /^[ \t]*(?:first[ \t]+name|forename|given[ \t]+name)[ \t]*[:=][ \t]*(.+?)[ \t]*$/im,
+  lastName:  /^[ \t]*(?:last[ \t]+name|surname|family[ \t]+name)[ \t]*[:=][ \t]*(.+?)[ \t]*$/im,
+  email:     /^[ \t]*(?:e-?mail(?:[ \t]+address)?|your[ \t]+e-?mail|contact[ \t]+e-?mail|visitor[ \t]+e-?mail|customer[ \t]+e-?mail)[ \t]*[:=][ \t]*([^\s,;<>]+@[^\s,;<>]+)[ \t]*$/im,
+  phone:     /^[ \t]*(?:phone(?:[ \t]+number)?|tel(?:ephone)?|mobile|cell|contact[ \t]+(?:phone|number))[ \t]*[:=][ \t]*(.+?)[ \t]*$/im,
+};
+
+// Email shape validator — same regex everywhere so a header-derived email
+// and a body-derived email get judged identically.
+const EMAIL_SHAPE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+function parseFormBody(text) {
+  if (!text || typeof text !== 'string') return null;
+  const out = {};
+
+  const nameMatch  = text.match(FORM_LABEL.name);
+  const firstMatch = text.match(FORM_LABEL.firstName);
+  const lastMatch  = text.match(FORM_LABEL.lastName);
+  const emailMatch = text.match(FORM_LABEL.email);
+  const phoneMatch = text.match(FORM_LABEL.phone);
+
+  // Name resolution: explicit "Name:" wins. Otherwise build from First/Last
+  // pair (either alone is acceptable — some forms only collect first name).
+  if (nameMatch) {
+    out.name = nameMatch[1].trim();
+  } else if (firstMatch || lastMatch) {
+    const parts = [
+      firstMatch && firstMatch[1].trim(),
+      lastMatch && lastMatch[1].trim(),
+    ].filter(Boolean);
+    if (parts.length) out.name = parts.join(' ');
+  }
+  // Reject the same robotic placeholders we filter from local-parts so that
+  // a form template literally containing "Name: Your Name Here" doesn't
+  // create a lead named "Your".
+  if (out.name && /^(your\s+name|name\s+here|n\/a|none|--)$/i.test(out.name)) {
+    delete out.name;
+  }
+
+  if (emailMatch) {
+    const candidate = emailMatch[1].trim().toLowerCase();
+    if (EMAIL_SHAPE.test(candidate)) out.email = candidate;
+  }
+
+  if (phoneMatch) {
+    // Re-run through extractPhone so the digit-count budget is enforced
+    // consistently with how unlabelled phones in the body are handled.
+    const validated = extractPhone(phoneMatch[1]);
+    if (validated) out.phone = validated;
+  }
+
+  if (!out.name && !out.email && !out.phone) return null;
+  return out;
+}
+
+// Sources where the From header is a bot / plugin and the real customer
+// lives in the body. For these we trust parseFormBody and fall back to the
+// header only if the body parser comes up empty (rare — typically means
+// the email isn't actually a form notification despite matching subject
+// hints, so we still skip rather than create noise).
+const SERVICE_NOTIFICATION_SOURCES = new Set([
+  'wordpress_form',
+  'tidio_livechat',
+  'tawk',
+  'crisp',
+  'smartsupp',
+  'livechat',
+]);
+
 // ---- HTML-to-text -------------------------------------------------------
 //
 // Lightweight stripper: drop scripts/styles, replace breaks with newlines,
@@ -226,23 +319,49 @@ function parseInboundEmail(payload = {}) {
   const headersBlob = payload.headers || '';
 
   const { displayName, address: fromAddress } = parseAddress(fromRaw);
-
-  const localPart = fromAddress ? fromAddress.split('@')[0] : null;
-  const name = displayName || guessNameFromLocalPart(localPart);
-
   const bodyText = text || htmlToText(html);
-  const phone    = extractPhone(`${bodyText}\n${subject}`);
 
   const source    = detectSource({ fromAddress, subject, text: bodyText });
   const sourceRef = extractMessageId(headersBlob)
     || fallbackRef(fromRaw, subject, payload.date || '');
+
+  // Decide where to pull contact info from. For a generic email (real
+  // customer wrote to info@yourdomain.com) the From header IS the lead.
+  // For bot-sent service notifications (form plugins, chat widgets) the
+  // From header is the bot — we extract from labelled fields in the body
+  // and fall back to header heuristics only if the body has nothing.
+  let name, email, phone;
+  if (SERVICE_NOTIFICATION_SOURCES.has(source)) {
+    const formData = parseFormBody(bodyText);
+    if (formData) {
+      name  = formData.name  || null;
+      email = formData.email || null;
+      phone = formData.phone || extractPhone(`${bodyText}\n${subject}`);
+    } else {
+      // Body parser found nothing — last-resort fall back to header so the
+      // lead lands SOMEWHERE rather than getting silently dropped. Drawer
+      // will show a bot name (e.g. "WordPress") which the operator can
+      // edit; better than zero record of an inbound contact.
+      const localPart = fromAddress ? fromAddress.split('@')[0] : null;
+      name  = displayName || guessNameFromLocalPart(localPart);
+      email = fromAddress;
+      phone = extractPhone(`${bodyText}\n${subject}`);
+    }
+  } else {
+    // Generic email — sender IS the lead. Body still contributes phone if
+    // they typed it in their signature.
+    const localPart = fromAddress ? fromAddress.split('@')[0] : null;
+    name  = displayName || guessNameFromLocalPart(localPart);
+    email = fromAddress;
+    phone = extractPhone(`${bodyText}\n${subject}`);
+  }
 
   const messageBody = subject ? `${subject}\n\n${bodyText}` : bodyText;
 
   return {
     toRaw,
     name,
-    email: fromAddress,
+    email,
     phone,
     message: messageBody.slice(0, 8000), // bound the size — full raw is on activity
     source,
@@ -260,4 +379,6 @@ module.exports = {
   htmlToText,
   extractPhone,
   extractMessageId,
+  parseFormBody,
+  SERVICE_NOTIFICATION_SOURCES,
 };

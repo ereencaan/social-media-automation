@@ -181,7 +181,7 @@
 - [x] Per-org forwarding address: `{intake_token}@leads.hitrapost.co.uk`
 - [x] SendGrid Inbound Parse setup live — `leads.hitrapost.co.uk` MX → mx.sendgrid.net, `EMAIL_INBOUND_SECRET` enforced via `?key=...` URL query, end-to-end test from Gmail produced a real lead
 - [x] Settings → "Email-to-Lead Address" reveal card + Tidio/Gmail/WP forward setup guide (per-source chip mapping documented inline)
-- [ ] CF7 / WPForms body-parser (extract name+email from "Name: X / Email: Y" patterns instead of using sender display name)
+- [x] CF7 / WPForms / Elementor / Gravity / Ninja body-parser — `parseFormBody()` extracts labelled `Name: / First Name+Last Name / Email: / Phone:` fields from the message body. Also handles `Visitor:` (Tidio) and `Sender:` (Tawk) chat-notification patterns. For service-notification sources (`wordpress_form` / `tidio_livechat` / `tawk` / `crisp` / `smartsupp` / `livechat`) body wins over the From header so the lead lands as the real customer ("Mike Brown") instead of the bot ("WordPress" / "Tidio"). Empty bodies still fall back to header so we never silently drop an inbound contact.
 
 ### Meta App Review (UNBLOCKS real IG/FB DM ingest)
 - [!] App icon 1024×1024
