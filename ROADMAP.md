@@ -211,10 +211,13 @@
 - [x] `PLATFORM_TONES.tiktok` so generated captions match the platform style (energetic, hook-first, gen-z phrasing OK)
 - [x] `tiktok_handle` on brand profile (DB column + Brand UI input + injected into buildBusinessBlock so Claude can append the handle to captions)
 - [x] Settings → Connections tile with "Coming soon" badge until Phase 2 lands
-- [ ] (Phase 2) `src/services/oauth/tiktok.oauth.js` (Login Kit authorize + token exchange)
-- [ ] (Phase 2) Content Posting API integration — `videos/upload.publish` flow with the audited "Direct Post" mode (or "Inbox" mode for unaudited apps)
+- [x] (Phase 2) `src/services/oauth/tiktok.oauth.js` — Login Kit authorize URL builder, code exchange, refresh, user info via `open.tiktokapis.com/v2`
+- [x] (Phase 2) `/api/connect/tiktok/start` + `/api/connect/tiktok/callback` wired in connect.routes; credentials persisted in social_credentials with platform=`tiktok`, `account_id=open_id`, scopes recorded for token-budget reasoning later
+- [x] (Phase 2) Settings → TikTok tile drops Coming soon, Connect button live; OAuth round-trip survives reconnect (open_id-keyed upsert)
+- [x] (Phase 2) `TIKTOK_CLIENT_KEY` + `TIKTOK_CLIENT_SECRET` documented in .env.example, set on prod
+- [ ] (Phase 2.5) Content Posting API publish — `tiktok.service.js` push_by_file Inbox mode (sandbox-friendly, video lands as draft for the creator)
+- [ ] (Phase 2 audit) Direct Post (`video.publish` scope) — needs production audit + demo video
 - [ ] (Phase 2) Async video status callback handling (TikTok processes uploads asynchronously)
-- [ ] (Phase 2) `TIKTOK_CLIENT_KEY` + `TIKTOK_CLIENT_SECRET` env wired
 
 **YouTube Shorts — Phase 1 shipped; Phase 2 needs Google Cloud project**
 - [x] `youtube_shorts` chip on the posts multi-platform selector + calendar plans

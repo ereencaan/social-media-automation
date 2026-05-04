@@ -3184,11 +3184,12 @@ VIEWS.settings = async function settingsView(root, myGen) {
         desc: 'Publish to Facebook pages you admin.' },
       { key: 'linkedin',  label: 'LinkedIn', icon: '💼', provider: 'linkedin',
         desc: 'Post to your personal LinkedIn feed on your behalf.' },
-      // P4 Phase 1: tiles surface now, OAuth lands in Phase 2. Until env
-      // vars are set, /api/connect/{provider}/start returns 503 and we
-      // fall back to a "Coming soon" disabled state on the button.
-      { key: 'tiktok',    label: 'TikTok',   icon: '🎵', provider: 'tiktok',  comingSoon: true,
-        desc: 'Auto-publish vertical short videos to your TikTok Business account. Requires TikTok for Developers app approval.' },
+      // P4 Phase 2: TikTok OAuth (Login Kit) is wired. Sandbox app under
+      // Hitratech Solutions Ltd; videos publish in Inbox mode (drafts) until
+      // production audit clears `video.publish` for Direct Post.
+      { key: 'tiktok',    label: 'TikTok',   icon: '🎵', provider: 'tiktok',
+        desc: 'Generate AI vertical short videos and push them as drafts to your TikTok account. Production Direct Post arrives after TikTok audit.' },
+      // YouTube Shorts is still Phase 1 — Google Cloud project pending.
       { key: 'youtube',   label: 'YouTube Shorts', icon: '▶', provider: 'youtube', comingSoon: true,
         desc: 'Upload AI-generated Shorts directly to your YouTube channel. Requires Google Cloud OAuth setup.' },
     ];

@@ -7,6 +7,7 @@ const router = express.Router();
 const state = require('../services/oauth/state');
 const linkedinOAuth = require('../services/oauth/linkedin.oauth');
 const metaOAuth     = require('../services/oauth/meta.oauth');
+const tiktokOAuth   = require('../services/oauth/tiktok.oauth');
 const credsService  = require('../services/social-credentials.service');
 
 function feBase(req) {
@@ -124,6 +125,74 @@ router.get('/meta/callback', async (req, res) => {
   } catch (err) {
     console.error('[connect/meta/callback]', err);
     res.redirect(uiCallbackUrl(req, { platform: 'meta', status: 'error', reason: err.message }));
+  }
+});
+
+// =========================================================================
+//   TikTok (Login Kit + Content Posting API — Inbox mode for sandbox apps)
+// =========================================================================
+router.get('/tiktok/start', (req, res) => {
+  try {
+    // Surface a friendly message when the operator hasn't wired the TikTok
+    // app credentials yet. Saves a confusing "TIKTOK_CLIENT_KEY is not set"
+    // crash on the client.
+    if (!process.env.TIKTOK_CLIENT_KEY || !process.env.TIKTOK_CLIENT_SECRET) {
+      return res.status(503).json({
+        error: 'TikTok integration is not configured on this server. Set TIKTOK_CLIENT_KEY and TIKTOK_CLIENT_SECRET.',
+      });
+    }
+    const stateToken = state.create(req, { platform: 'tiktok', orgId: req.user.orgId });
+    const url = tiktokOAuth.buildAuthorizeUrl(stateToken);
+    res.json({ url });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/tiktok/callback', async (req, res) => {
+  try {
+    if (req.query.error) {
+      return res.redirect(uiCallbackUrl(req, {
+        platform: 'tiktok', status: 'error',
+        reason: req.query.error_description || req.query.error,
+      }));
+    }
+    const { platform, orgId } = state.verifyAndConsume(req, req.query.state);
+    if (platform !== 'tiktok') throw new Error('State platform mismatch');
+
+    const token = await tiktokOAuth.exchangeCode(req.query.code);
+
+    // open_id is the stable per-app user identifier — that's what we pin
+    // the credential row on (so reconnects update the same row).
+    let userInfo = null;
+    try { userInfo = await tiktokOAuth.fetchUserInfo(token.access_token); } catch (_) { /* non-fatal */ }
+
+    const expiresAt = token.expires_in
+      ? new Date(Date.now() + token.expires_in * 1000).toISOString()
+      : null;
+    const refreshExpiresAt = token.refresh_expires_in
+      ? new Date(Date.now() + token.refresh_expires_in * 1000).toISOString()
+      : null;
+
+    credsService.upsert(orgId, 'tiktok', {
+      account_id:         token.open_id || (userInfo && userInfo.open_id) || null,
+      account_name:       (userInfo && userInfo.display_name) || null,
+      account_handle:     (userInfo && userInfo.username) ? `@${userInfo.username}` : null,
+      account_avatar_url: (userInfo && userInfo.avatar_url) || null,
+      access_token:       token.access_token,
+      refresh_token:      token.refresh_token || null,
+      token_type:         token.token_type || 'Bearer',
+      expires_at:         expiresAt,
+      refresh_expires_at: refreshExpiresAt,
+      scopes:             token.scope || tiktokOAuth.SCOPES.join(','),
+    });
+
+    res.redirect(uiCallbackUrl(req, { platform: 'tiktok', status: 'ok' }));
+  } catch (err) {
+    console.error('[connect/tiktok/callback]', err);
+    res.redirect(uiCallbackUrl(req, {
+      platform: 'tiktok', status: 'error', reason: err.message,
+    }));
   }
 });
 
