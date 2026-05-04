@@ -1302,46 +1302,63 @@ VIEWS.posts = async function postsView(root, myGen) {
     }
   };
   form.appendChild(el('div', { class: 'row' },
-    el('div', { class: 'field' },
-      el('label', {}, 'Platforms',
-        // Multi-select chip group. Same caption + image gets cross-posted to
-        // every selected platform on Generate. Default: Instagram only.
-        (() => {
-          const wrap = el('div', { class: 'chip-group' });
-          [
-            ['instagram',      '📷 Instagram'],
-            ['linkedin',       '💼 LinkedIn'],
-            ['facebook',       '👥 Facebook'],
-            // P4 Phase 1: chip surfaces now so the operator can plan posts
-            // for these channels. Phase 2 will wire actual publishing.
-            ['tiktok',         '🎵 TikTok'],
-            ['youtube_shorts', '▶ YouTube Shorts'],
-          ].forEach(([v, t], i) => {
-            const id = `plat-${v}`;
-            const cb = el('input', {
-              type: 'checkbox', name: 'platforms', value: v, id,
-              ...(i === 0 ? { checked: 'checked' } : {}),
-            });
-            const lab = el('label', { for: id, class: 'chip-label' }, t);
-            wrap.appendChild(cb);
-            wrap.appendChild(lab);
-          });
-          return wrap;
-        })(),
-      ),
-    ),
-    el('div', { class: 'field' },
-      el('label', {}, 'Format',
-        (() => {
-          const s = el('select', { name: 'format' });
-          [
-            ['image', 'Image (Flux)'],
-            ['video', 'Video / Reel (Runway)'],
-          ].forEach(([v, t]) => s.appendChild(el('option', { value: v }, t)));
-          return s;
-        })(),
-      ),
-    ),
+    (() => {
+      // Build the platform chips and the format select together so the
+      // chip-group change handler can auto-flip the format to "video" the
+      // moment a vertical-only platform (TikTok / YouTube Shorts) is
+      // checked. Without this auto-route the operator picks TikTok, hits
+      // Generate, gets an image post, and the publish button throws
+      // because TikTok wants a video.
+      const VERTICAL = ['tiktok', 'youtube_shorts'];
+
+      // Format select — hoisted so the change handler below can mutate it.
+      const formatSel = el('select', { name: 'format' });
+      [
+        ['image', 'Image (Flux)'],
+        ['video', 'Video / Reel (Runway)'],
+      ].forEach(([v, t]) => formatSel.appendChild(el('option', { value: v }, t)));
+
+      const chipWrap = el('div', { class: 'chip-group' });
+      [
+        ['instagram',      '📷 Instagram'],
+        ['linkedin',       '💼 LinkedIn'],
+        ['facebook',       '👥 Facebook'],
+        ['tiktok',         '🎵 TikTok'],
+        ['youtube_shorts', '▶ YouTube Shorts'],
+      ].forEach(([v, t], i) => {
+        const id = `plat-${v}`;
+        const cb = el('input', {
+          type: 'checkbox', name: 'platforms', value: v, id,
+          ...(i === 0 ? { checked: 'checked' } : {}),
+        });
+        const lab = el('label', { for: id, class: 'chip-label' }, t);
+        chipWrap.appendChild(cb);
+        chipWrap.appendChild(lab);
+      });
+
+      // Single delegated handler, runs on any chip toggle. We only force
+      // 'video' when a vertical platform is the *only* type ticked or
+      // mixed-with-others — basically any time the operator wants TikTok
+      // or YouTube on the post. We never auto-flip *back* to image — the
+      // operator may have other reasons for staying on video.
+      chipWrap.addEventListener('change', () => {
+        const checked = Array.from(chipWrap.querySelectorAll('input[name=platforms]:checked'))
+          .map((c) => c.value);
+        if (checked.some((p) => VERTICAL.includes(p)) && formatSel.value !== 'video') {
+          formatSel.value = 'video';
+          // Subtle hint so the operator notices the auto-route. Toast
+          // rather than alert so it doesn't block the form.
+          if (typeof toast === 'function') {
+            toast('Auto-set Format to Video — TikTok / Shorts need a vertical clip.', 'info', 4500);
+          }
+        }
+      });
+
+      return [
+        el('div', { class: 'field' }, el('label', {}, 'Platforms', chipWrap)),
+        el('div', { class: 'field' }, el('label', {}, 'Format', formatSel)),
+      ];
+    })(),
   ));
 
   // On-brand toggle — visible only if a business profile exists
