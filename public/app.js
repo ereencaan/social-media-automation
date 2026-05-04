@@ -1778,6 +1778,34 @@ function openPostPreview(post) {
           } catch (err) { toast(err.message, 'error'); }
         },
       }, '🚀 Publish now'),
+      // P4 Phase 2.5: TikTok-specific publish path. Goes through the
+      // Content Posting API in Inbox mode (sandbox-friendly: video lands
+      // as a draft in the creator's TikTok inbox, they publish from the
+      // app). Only show the button when TikTok is one of the platforms
+      // selected on this post.
+      platforms.includes('tiktok')
+        ? el('button', {
+            class: 'btn btn-sm',
+            style: 'background:rgba(254,44,85,0.16); color:#FE2C55; border-color:rgba(254,44,85,0.40)',
+            title: 'Push the video to your TikTok inbox as a draft. You finish publishing from the TikTok app.',
+            onclick: async (e) => {
+              const btn = e.currentTarget;
+              if (!confirm('Push this video to TikTok as a draft? You will need to open the TikTok app to actually publish it.')) return;
+              btn.disabled = true;
+              btn.textContent = '⏳ Uploading…';
+              try {
+                const r = await api('/api/posts/' + post.id + '/publish/tiktok', { method: 'POST' });
+                toast('Pushed to TikTok inbox · open the app to publish', 'success', 6000);
+                console.log('[tiktok publish]', r);
+              } catch (err) {
+                toast(err.message, 'error');
+              } finally {
+                btn.disabled = false;
+                btn.textContent = '🎵 Push to TikTok';
+              }
+            },
+          }, '🎵 Push to TikTok')
+        : null,
       el('button', {
         class: 'btn btn-danger btn-sm',
         onclick: async () => {

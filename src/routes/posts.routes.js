@@ -14,6 +14,7 @@ const { listTemplates, renderTemplate, renderVideo } = require('../services/temp
 const { generateVideo, generateVideoFromImage } = require('../services/runway.service');
 const { applyImageOverlay, applyVideoOverlay } = require('../services/overlay.service');
 const { schedulePost, cancelSchedule, publishPost } = require('../services/scheduler.service');
+const { postToTikTok, fetchStatus: fetchTikTokStatus } = require('../services/tiktok.service');
 const { enforceQuota, requirePlan } = require('../middleware/billing');
 const { requireVerifiedEmail } = require('../middleware/email-verified');
 const usage = require('../services/usage.service');
@@ -408,6 +409,46 @@ router.post('/:id/publish', async (req, res) => {
     const logs = prepare('SELECT * FROM post_logs WHERE post_id = ? ORDER BY posted_at DESC').all(req.params.id);
     res.json({ ...updated, platforms: JSON.parse(updated.platforms), logs, results });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Publish a post's video to TikTok as an Inbox draft. Sandbox-friendly
+// (uses video.upload scope only). For testing flexibility we accept a
+// body.video_url override so the operator can push any public video URL
+// to TikTok without first having to run the post through the video
+// generation pipeline.
+//
+// Direct Post (live publish, with caption) lands once the app passes
+// TikTok's Production audit and we add the video.publish scope.
+router.post('/:id/publish/tiktok', async (req, res) => {
+  const post = getOwnedPost(req.params.id, req.user.orgId);
+  if (!post) return res.status(404).json({ error: 'Post not found' });
+
+  // The posts schema stores video output URLs in image_url today (single
+  // media field for both image and video). Allow an explicit override
+  // for test runs where the post has only an image and we want to push
+  // an arbitrary mp4.
+  const videoUrl = (req.body && req.body.video_url) || post.image_url;
+  if (!videoUrl) {
+    return res.status(400).json({
+      error: 'Post has no media URL and no video_url override was provided',
+    });
+  }
+
+  try {
+    const result = await postToTikTok(videoUrl, { orgId: req.user.orgId });
+    // Best-effort fetch of status so the UI can show "PROCESSING_UPLOAD"
+    // immediately. Some publish_ids show null status for a few seconds
+    // — we tolerate that.
+    let status = null;
+    try {
+      const cred = require('../services/social-credentials.service').getActive(req.user.orgId, 'tiktok');
+      if (cred) status = await fetchTikTokStatus(cred.access_token, result.publishId);
+    } catch (_) { /* non-fatal */ }
+    res.json({ ...result, status });
+  } catch (err) {
+    console.error('[posts/publish/tiktok]', err);
     res.status(500).json({ error: err.message });
   }
 });
