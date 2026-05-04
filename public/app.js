@@ -3261,8 +3261,19 @@ VIEWS.settings = async function settingsView(root, myGen) {
 };
 
 function renderConnectedAccount(a, refresh) {
-  const daysLeft = a.expires_at
-    ? Math.floor((new Date(a.expires_at).getTime() - Date.now()) / 86400000)
+  // The access token is short-lived for most providers (Google = 1h,
+  // TikTok = 24h, LinkedIn = 60d, Meta = 60d). What matters for the UI
+  // is when the *connection* dies — that's the refresh-token lifetime.
+  // Google refresh tokens don't expire on a fixed clock, so we treat
+  // null refresh_expires_at as "indefinite, just show Active". For
+  // providers with a finite refresh lifetime (TikTok 365d, LinkedIn 1y)
+  // we show the real countdown so the operator knows when reconnect
+  // is needed. has_refresh_token is set by social-credentials.presentSafe
+  // and tells us whether to ignore the access-token clock entirely.
+  const effectiveExpiry = a.refresh_expires_at
+    || (a.has_refresh_token ? null : a.expires_at);
+  const daysLeft = effectiveExpiry
+    ? Math.floor((new Date(effectiveExpiry).getTime() - Date.now()) / 86400000)
     : null;
   const statusClass = a.status === 'active'
     ? (daysLeft !== null && daysLeft < 7 ? 'warn' : 'good')

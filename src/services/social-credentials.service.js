@@ -115,6 +115,12 @@ function presentSafe(row) {
   } = row;
   // Show a short hint so the user knows *which* token it is
   safe.token_hint = access_token ? access_token.slice(0, 6) + '…' : null;
+  // Boolean flag for the UI to decide whether to show a meaningful
+  // countdown (no refresh = the access-token expiry IS the death clock)
+  // or "Active" forever (refresh token can be redeemed for new access
+  // tokens for as long as the provider allows). Keeps the secret out
+  // of the response while letting the frontend reason about lifecycle.
+  safe.has_refresh_token = !!refresh_token;
   return safe;
 }
 
