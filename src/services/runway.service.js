@@ -59,20 +59,24 @@ async function generateVideo(prompt, platform = 'instagram', duration = 5) {
   // Runway gen4.5 has a hard time honoring "no text" when the prompt
   // mentions a brand or platform names — it ends up rendering misspelled
   // signage / fake UI screens in-scene. Two-pronged defence:
-  //   1. Strip brand/platform tokens from the incoming prompt (caller
-  //      should also do this, but defence-in-depth — Claude sometimes
-  //      slips brand names back in).
-  //   2. Stronger no-text directive that explicitly bans signs, screens,
-  //      logos, watermarks, and UI mockups inside the scene. The brand
-  //      logo + contact strip are added as a video-overlay pass *after*
-  //      Runway, so we want a clean visual canvas underneath.
-  const sanitised = stripBrandTokens(prompt);
-  const promptText = `Social media reel: ${sanitised}. ` +
-    `Professional, eye-catching, suitable for ${platform}. ` +
-    `Photorealistic visual scene only. ` +
-    `Absolutely NO text, NO writing, NO letters, NO words, NO signs, ` +
-    `NO logos, NO watermarks, NO mockup UI, NO platform icons inside the scene. ` +
-    `If a screen is shown it must be blank or display abstract patterns only.`;
+  //   1. Strip brand/platform tokens from the incoming prompt
+  //      (defence-in-depth — Claude sometimes slips brand names back in).
+  //   2. Compact no-text directive bolted to the end so we don't bust
+  //      Runway's 1000-char promptText cap. The brand logo + contact
+  //      strip are added as a video-overlay pass *after* Runway, so we
+  //      want a clean visual canvas underneath.
+  const SUFFIX = ' Photorealistic, cinematic. NO text, NO letters, NO logos, NO watermarks, NO mockup UI on any screen.';
+  const HARD_CAP = 1000;
+  let sanitised = stripBrandTokens(prompt);
+  // Reserve room for the suffix; trim the prompt body if it would push us
+  // past Runway's 1000-char ceiling. Trimming on a sentence boundary
+  // when possible so we don't end mid-clause.
+  const room = HARD_CAP - SUFFIX.length;
+  if (sanitised.length > room) {
+    const cut = sanitised.lastIndexOf('.', room);
+    sanitised = sanitised.slice(0, cut > room - 200 ? cut + 1 : room).trim();
+  }
+  const promptText = sanitised + SUFFIX;
 
   console.log('[Runway] generateVideo start ratio=%s duration=%s', ratio, duration);
   const task = await apiRequest('POST', '/text_to_video', {
