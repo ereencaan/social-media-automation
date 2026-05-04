@@ -32,6 +32,7 @@ async function generateAndSavePost({
   platforms = ['instagram'],
   onBrand = true, variants = 1, qualityGate = true,
   initialStatus = 'draft',
+  existingId = null, // when set, UPDATE that row instead of INSERTing new
 }) {
   if (!orgId) throw new Error('orgId required');
   if (!prompt) throw new Error('prompt required');
@@ -52,22 +53,38 @@ async function generateAndSavePost({
   const fileName = `post_${Date.now()}.jpg`;
   const cloudResult = await uploadImage(finalBuffer, fileName);
 
-  // 4. Persist
-  const id = generateId();
+  // 4. Persist — UPDATE the placeholder row when the route created one
+  // up-front (async-job pattern), otherwise INSERT a fresh row.
+  const id = existingId || generateId();
   const hashtags = content.hashtags.map((t) => `#${String(t).replace(/^#/, '')}`).join(' ');
 
-  prepare(`
-    INSERT INTO posts
-      (id, org_id, user_id, prompt, caption, hashtags, image_url, drive_url, drive_file_id, platforms, status, quality_score, quality_report)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    id, orgId, userId, prompt, content.caption, hashtags,
-    image.url, cloudResult.publicUrl, cloudResult.fileId,
-    JSON.stringify(platforms),
-    initialStatus,
-    quality ? quality.score : null,
-    quality ? JSON.stringify(quality) : null,
-  );
+  if (existingId) {
+    prepare(`
+      UPDATE posts
+         SET caption = ?, hashtags = ?, image_url = ?, drive_url = ?, drive_file_id = ?,
+             status = ?, quality_score = ?, quality_report = ?, updated_at = datetime('now')
+       WHERE id = ? AND org_id = ?
+    `).run(
+      content.caption, hashtags, image.url, cloudResult.publicUrl, cloudResult.fileId,
+      initialStatus,
+      quality ? quality.score : null,
+      quality ? JSON.stringify(quality) : null,
+      id, orgId,
+    );
+  } else {
+    prepare(`
+      INSERT INTO posts
+        (id, org_id, user_id, prompt, caption, hashtags, image_url, drive_url, drive_file_id, platforms, status, quality_score, quality_report)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id, orgId, userId, prompt, content.caption, hashtags,
+      image.url, cloudResult.publicUrl, cloudResult.fileId,
+      JSON.stringify(platforms),
+      initialStatus,
+      quality ? quality.score : null,
+      quality ? JSON.stringify(quality) : null,
+    );
+  }
 
   const post = prepare('SELECT * FROM posts WHERE id = ? AND org_id = ?').get(id, orgId);
   return { id, post, content, quality };

@@ -1460,17 +1460,68 @@ VIEWS.posts = async function postsView(root, myGen) {
     // Detached fetch — survives view changes. Result handler is allowed to
     // fire even if the user is on another page; we toast + refresh Posts
     // list lazily via a route nudge.
+    // Async generate: backend returns 202 + post.id immediately, runs the
+    // heavy work in the background, and flips post.status from 'generating'
+    // to 'draft' (success) or 'failed' (error) when done. We poll for that
+    // transition so Cloudflare's edge timeout can never 524 us.
     api(endpoint, {
       method: 'POST',
       body: { prompt: promptText, platforms, onBrand, qualityGate, variants, duration },
-    }).then((result) => {
-      const msg = result.quality
-        ? `Post ready — quality ${result.quality.score}/100${result.quality.refined ? ' (auto-refined)' : ''}`
-        : 'Post ready';
-      updateJob(jobId, { status: 'done', label: msg });
-      toast(msg + ' · click Posts to view.', 'success', 6000);
-      // If the user is currently on Posts, refresh it so the new post shows.
-      if ((location.hash || '').includes('posts')) navigate('posts', { replace: true });
+    }).then((accepted) => {
+      // Older synchronous API path returns the full post + quality on the
+      // first response. Detect by presence of caption / quality.
+      if (accepted.caption || accepted.quality) {
+        const msg = accepted.quality
+          ? `Post ready — quality ${accepted.quality.score}/100${accepted.quality.refined ? ' (auto-refined)' : ''}`
+          : 'Post ready';
+        updateJob(jobId, { status: 'done', label: msg });
+        toast(msg + ' · click Posts to view.', 'success', 6000);
+        if ((location.hash || '').includes('posts')) navigate('posts', { replace: true });
+        return;
+      }
+      const postId = accepted.id;
+      if (!postId) {
+        updateJob(jobId, { status: 'error', label: 'Generate failed: no post id returned' });
+        toast('Generate failed: no post id returned', 'error', 6000);
+        return;
+      }
+      // Poll every 4s up to 8 minutes (video gen + ffmpeg + Cloudinary
+      // upload can take that long during Runway queue spikes). On the
+      // final timeout we just stop polling — the post will still be in
+      // the Posts list once it lands.
+      const POLL_MS = 4000;
+      const MAX_POLLS = Math.floor(8 * 60 * 1000 / POLL_MS);
+      let polls = 0;
+      const tick = async () => {
+        polls++;
+        try {
+          const post = await api('/api/posts/' + postId);
+          if (post.status === 'draft') {
+            const score = post.quality_score;
+            const msg = (score != null) ? `Post ready — quality ${score}/100` : 'Post ready';
+            updateJob(jobId, { status: 'done', label: msg });
+            toast(msg + ' · click Posts to view.', 'success', 6000);
+            if ((location.hash || '').includes('posts')) navigate('posts', { replace: true });
+            return;
+          }
+          if (post.status === 'failed') {
+            updateJob(jobId, { status: 'error', label: 'Generate failed (server-side)' });
+            toast('Generate failed — check server log', 'error', 6000);
+            return;
+          }
+          if (polls >= MAX_POLLS) {
+            updateJob(jobId, { status: 'error', label: 'Still generating — check Posts later' });
+            toast('Still generating after 8 min — check Posts list later', 'info', 6000);
+            return;
+          }
+          setTimeout(tick, POLL_MS);
+        } catch (err) {
+          // Auth blip / network blip — retry a few times before bailing.
+          if (polls < 5) { setTimeout(tick, POLL_MS); return; }
+          updateJob(jobId, { status: 'error', label: 'Poll failed: ' + err.message });
+        }
+      };
+      setTimeout(tick, POLL_MS);
     }).catch((err) => {
       updateJob(jobId, { status: 'error', label: 'Generate failed: ' + err.message });
       toast('Generate failed: ' + err.message, 'error', 6000);
@@ -1496,8 +1547,37 @@ VIEWS.posts = async function postsView(root, myGen) {
   const grid = el('div', { class: 'post-grid' });
   for (const p of posts) {
     const mediaWrap = el('div', { class: 'post-thumb-media' });
-    if (p.drive_url) mediaWrap.appendChild(el('img', { src: p.drive_url, alt: '' }));
-    else mediaWrap.appendChild(el('div', { style: 'aspect-ratio:1; background:var(--bg-soft)' }));
+    // Detect mp4 / mov / webm so we render a <video> instead of <img>.
+    // Setting <img src=*.mp4> just shows the broken-image icon and is
+    // confusing on a list of generated posts. We mute + autoplay + loop
+    // for an animated preview that doesn't autostart audio.
+    if (p.drive_url) {
+      const isVideo = /\.(mp4|mov|webm)(?:$|\?)/i.test(p.drive_url);
+      if (isVideo) {
+        const v = el('video', {
+          src: p.drive_url, muted: '', autoplay: '', loop: '',
+          playsinline: '', preload: 'metadata',
+          style: 'width:100%; height:100%; object-fit:cover;',
+        });
+        v.addEventListener('canplay', () => { try { v.play(); } catch (_) { /* ignored */ } });
+        mediaWrap.appendChild(v);
+      } else {
+        mediaWrap.appendChild(el('img', { src: p.drive_url, alt: '' }));
+      }
+    } else if (p.status === 'generating') {
+      // Async-job placeholder: post row exists but media is still in the
+      // pipeline. Show a 'cooking' state so the user can see the job is
+      // alive — without it the empty thumbnail looks like a broken card.
+      mediaWrap.appendChild(el('div', {
+        style: 'aspect-ratio:1; background:linear-gradient(135deg,var(--surface-2),var(--bg-soft)); display:flex; align-items:center; justify-content:center; color:var(--text-dim); font-size:13px; padding:14px; text-align:center;',
+      }, '⏳ Generating…'));
+    } else if (p.status === 'failed') {
+      mediaWrap.appendChild(el('div', {
+        style: 'aspect-ratio:1; background:rgba(239,68,68,0.10); display:flex; align-items:center; justify-content:center; color:#fca5a5; font-size:13px; padding:14px; text-align:center;',
+      }, '⚠ Generation failed'));
+    } else {
+      mediaWrap.appendChild(el('div', { style: 'aspect-ratio:1; background:var(--bg-soft)' }));
+    }
     if (p.quality && typeof p.quality.score === 'number') {
       mediaWrap.appendChild(renderQualityBadge(p.quality.score));
     }

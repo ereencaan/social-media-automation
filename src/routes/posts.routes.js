@@ -20,45 +20,61 @@ const { enforceQuota, requirePlan } = require('../middleware/billing');
 const { requireVerifiedEmail } = require('../middleware/email-verified');
 const usage = require('../services/usage.service');
 
-// Generate content with AI (DALL-E + Claude)
+// Generate content with AI (DALL-E + Claude).
 // Quota: counts as 1 post + 1 ai_call. Both must be under the plan limit.
-// Verified email required — see middleware/email-verified.js.
+// Verified email required.
+//
+// Async pattern: we insert a placeholder row with status='generating',
+// reply 202 + post.id immediately, and let the heavy work run in the
+// background via setImmediate. This keeps every request <1s on the
+// wire so Cloudflare's edge timeout (~100s on the free tier) can never
+// 524 a video / image gen. The frontend polls GET /api/posts/:id until
+// status flips to 'draft' (success) or 'failed' (any unhandled error).
+// Quotas are incremented only AFTER successful completion so a failed
+// gen doesn't burn the customer's monthly cap.
 router.post('/generate',
   requireVerifiedEmail,
   enforceQuota('posts'),
   enforceQuota('ai_calls'),
   async (req, res) => {
-  try {
-    const { prompt, platforms = ['instagram'], onBrand = true, variants = 1, qualityGate = true } = req.body;
-    if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
+    try {
+      const { prompt, platforms = ['instagram'], onBrand = true, variants = 1, qualityGate = true } = req.body;
+      if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
 
-    const { id, post, content, quality } = await generateAndSavePost({
-      orgId: req.user.orgId, userId: req.user.id,
-      prompt, platforms, onBrand, variants, qualityGate,
-    });
+      const id = generateId();
+      prepare(`
+        INSERT INTO posts (id, org_id, user_id, prompt, platforms, status)
+        VALUES (?, ?, ?, ?, ?, 'generating')
+      `).run(id, req.user.orgId, req.user.id, prompt, JSON.stringify(platforms));
 
-    // Increment AFTER success — failed generations don't burn quota.
-    usage.increment(req.user.orgId, 'posts');
-    usage.increment(req.user.orgId, 'ai_calls');
+      res.status(202).json({ id, status: 'generating' });
 
-    res.json({
-      id, prompt,
-      caption:          content.caption,
-      hashtags:         post.hashtags,
-      platformCaptions: content.platformCaptions,
-      imageUrl:         post.drive_url,
-      driveUrl:         post.drive_url,
-      status:           'draft',
-      quality,
-    });
-  } catch (err) {
-    console.error('[Generate]', err);
-    res.status(500).json({ error: err.message });
-  }
-});
+      // The factory writes the rest of the columns when it's done; we just
+      // pass it the id we already created and tell it to update in place.
+      setImmediate(async () => {
+        try {
+          await generateAndSavePost({
+            orgId: req.user.orgId, userId: req.user.id,
+            prompt, platforms, onBrand, variants, qualityGate,
+            existingId: id,
+          });
+          usage.increment(req.user.orgId, 'posts');
+          usage.increment(req.user.orgId, 'ai_calls');
+        } catch (err) {
+          console.error('[posts/generate async]', err);
+          prepare(`UPDATE posts SET status = 'failed', updated_at = datetime('now') WHERE id = ? AND org_id = ?`)
+            .run(id, req.user.orgId);
+        }
+      });
+    } catch (err) {
+      console.error('[posts/generate]', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
 
-// Generate video/reel with AI (Runway + Claude)
-// Pro+ only — video generation is bundled into the higher tiers.
+// Generate video/reel with AI (Runway + Claude). Same async pattern as
+// /generate — the heavy work runs in setImmediate after we reply 202
+// so Cloudflare's edge timeout can never 524 the request. Pro+ only.
 router.post('/generate-video',
   requireVerifiedEmail,
   requirePlan('pro'),
@@ -67,77 +83,68 @@ router.post('/generate-video',
   async (req, res) => {
   try {
     let { prompt, platforms = ['instagram'], duration = 5, onBrand = true, variants = 1, qualityGate = true } = req.body;
-    // Clamp to the durations Runway gen4.5 supports natively (5 or 10).
-    // Longer reels need the multi-clip composer (P5) — until that ships,
-    // anything else from the UI / a tampered request gets snapped to 5.
     duration = (Number(duration) === 10) ? 10 : 5;
     if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
 
-    const brand = prepare('SELECT * FROM brand_settings WHERE org_id = ?').get(req.user.orgId);
-
-    // 1. Orchestrated content generation (Claude → OpenAI critique → optional refine)
-    const { content, quality } = await orchestrateContent(prompt, platforms, {
-      business: brand, onBrand, variants, qualityGate,
-    });
-
-    // 2. Generate video with Runway. Strip the business name from the
-    //    image prompt before handing it to Runway — Claude tends to slot
-    //    the brand name into the scene description ("HITRATECH banner",
-    //    "Hitratech sign") and Runway then bakes misspelled text into
-    //    the video. The overlay pass adds the real logo + contact strip
-    //    on top, so the underlying scene should stay text-free.
-    const rawImagePrompt = content.imagePrompt || prompt;
-    const safeImagePrompt = brand && brand.business_name
-      ? rawImagePrompt.replace(
-          new RegExp(`\\b${brand.business_name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\b`, 'gi'),
-          'the brand',
-        )
-      : rawImagePrompt;
-    const video = await generateVideo(safeImagePrompt, platforms[0], duration);
-
-    // 3. Apply branding overlay + upload to Cloudinary
-    let cloudResult;
-    if (brand && (brand.logo_url || brand.phone || brand.website)) {
-      const videoBuffer = await downloadImage(video.url);
-      const overlaidBuffer = await applyVideoOverlay(videoBuffer, brand);
-      const { uploadVideo } = require('../services/cloudinary.service');
-      cloudResult = await uploadVideo(overlaidBuffer, `reel_${Date.now()}.mp4`);
-    } else {
-      cloudResult = await uploadFromUrl(video.url, { isVideo: true, publicId: `reel_${Date.now()}` });
-    }
-
-    // 4. Save to database
     const id = generateId();
-    const hashtags = content.hashtags.map(t => `#${t}`).join(' ');
-
     prepare(`
-      INSERT INTO posts (id, org_id, user_id, prompt, caption, hashtags, image_url, drive_url, drive_file_id, platforms, status, quality_score, quality_report)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)
-    `).run(
-      id, req.user.orgId, req.user.id, prompt, content.caption, hashtags,
-      video.url, cloudResult.publicUrl, cloudResult.fileId,
-      JSON.stringify(platforms),
-      quality ? quality.score : null,
-      quality ? JSON.stringify(quality) : null,
-    );
+      INSERT INTO posts (id, org_id, user_id, prompt, platforms, status)
+      VALUES (?, ?, ?, ?, ?, 'generating')
+    `).run(id, req.user.orgId, req.user.id, prompt, JSON.stringify(platforms));
 
-    usage.increment(req.user.orgId, 'posts');
-    usage.increment(req.user.orgId, 'ai_calls');
+    res.status(202).json({ id, status: 'generating' });
 
-    res.json({
-      id,
-      prompt,
-      caption: content.caption,
-      hashtags,
-      platformCaptions: content.platformCaptions,
-      imageUrl: cloudResult.publicUrl,
-      driveUrl: cloudResult.publicUrl,
-      format: 'mp4',
-      status: 'draft',
-      quality,
+    setImmediate(async () => {
+      try {
+        const brand = prepare('SELECT * FROM brand_settings WHERE org_id = ?').get(req.user.orgId);
+
+        const { content, quality } = await orchestrateContent(prompt, platforms, {
+          business: brand, onBrand, variants, qualityGate,
+        });
+
+        const rawImagePrompt = content.imagePrompt || prompt;
+        const safeImagePrompt = brand && brand.business_name
+          ? rawImagePrompt.replace(
+              new RegExp(`\\b${brand.business_name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\b`, 'gi'),
+              'the brand',
+            )
+          : rawImagePrompt;
+
+        const video = await generateVideo(safeImagePrompt, platforms[0], duration);
+
+        let cloudResult;
+        if (brand && (brand.logo_url || brand.phone || brand.website)) {
+          const videoBuffer = await downloadImage(video.url);
+          const overlaidBuffer = await applyVideoOverlay(videoBuffer, brand);
+          const { uploadVideo } = require('../services/cloudinary.service');
+          cloudResult = await uploadVideo(overlaidBuffer, `reel_${Date.now()}.mp4`);
+        } else {
+          cloudResult = await uploadFromUrl(video.url, { isVideo: true, publicId: `reel_${Date.now()}` });
+        }
+
+        const hashtags = content.hashtags.map(t => `#${t}`).join(' ');
+        prepare(`
+          UPDATE posts
+             SET caption = ?, hashtags = ?, image_url = ?, drive_url = ?, drive_file_id = ?,
+                 status = 'draft', quality_score = ?, quality_report = ?, updated_at = datetime('now')
+           WHERE id = ? AND org_id = ?
+        `).run(
+          content.caption, hashtags, video.url, cloudResult.publicUrl, cloudResult.fileId,
+          quality ? quality.score : null,
+          quality ? JSON.stringify(quality) : null,
+          id, req.user.orgId,
+        );
+
+        usage.increment(req.user.orgId, 'posts');
+        usage.increment(req.user.orgId, 'ai_calls');
+      } catch (err) {
+        console.error('[posts/generate-video async]', err);
+        prepare(`UPDATE posts SET status = 'failed', updated_at = datetime('now') WHERE id = ? AND org_id = ?`)
+          .run(id, req.user.orgId);
+      }
     });
   } catch (err) {
-    console.error('[GenerateVideo]', err);
+    console.error('[posts/generate-video]', err);
     res.status(500).json({ error: err.message });
   }
 });
