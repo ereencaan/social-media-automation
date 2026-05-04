@@ -15,6 +15,7 @@ const { generateVideo, generateVideoFromImage } = require('../services/runway.se
 const { applyImageOverlay, applyVideoOverlay } = require('../services/overlay.service');
 const { schedulePost, cancelSchedule, publishPost } = require('../services/scheduler.service');
 const { postToTikTok, fetchStatus: fetchTikTokStatus } = require('../services/tiktok.service');
+const { postToYouTube } = require('../services/youtube.service');
 const { enforceQuota, requirePlan } = require('../middleware/billing');
 const { requireVerifiedEmail } = require('../middleware/email-verified');
 const usage = require('../services/usage.service');
@@ -449,6 +450,37 @@ router.post('/:id/publish/tiktok', async (req, res) => {
     res.json({ ...result, status });
   } catch (err) {
     console.error('[posts/publish/tiktok]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Publish a post's video as a YouTube Short via the Data API v3
+// resumable upload. Title + description come from the post's caption +
+// hashtags; we always append #Shorts so YouTube classifies the upload
+// as a Short. Defaults to privacy='private' so sandbox uploads don't
+// go public — pass body.privacy='public' or 'unlisted' to override.
+//
+// Quota note: each successful publish costs 1,600 units; the default
+// project quota is 10,000/day. In production we'll request an increase.
+router.post('/:id/publish/youtube', async (req, res) => {
+  const post = getOwnedPost(req.params.id, req.user.orgId);
+  if (!post) return res.status(404).json({ error: 'Post not found' });
+
+  const videoUrl = (req.body && req.body.video_url) || post.image_url;
+  if (!videoUrl) {
+    return res.status(400).json({
+      error: 'Post has no media URL and no video_url override was provided',
+    });
+  }
+
+  try {
+    const result = await postToYouTube(post, videoUrl, {
+      orgId:   req.user.orgId,
+      privacy: (req.body && req.body.privacy) || 'private',
+    });
+    res.json(result);
+  } catch (err) {
+    console.error('[posts/publish/youtube]', err);
     res.status(500).json({ error: err.message });
   }
 });

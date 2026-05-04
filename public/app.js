@@ -1806,6 +1806,36 @@ function openPostPreview(post) {
             },
           }, '🎵 Push to TikTok')
         : null,
+      // P4 Phase 2.5b: YouTube Shorts upload (videos.insert resumable).
+      // Defaults to privacy=private so sandbox uploads don't go public —
+      // operator can flip the new Short to public from YouTube Studio.
+      platforms.includes('youtube_shorts')
+        ? el('button', {
+            class: 'btn btn-sm',
+            style: 'background:rgba(255,0,0,0.14); color:#FF0000; border-color:rgba(255,0,0,0.40)',
+            title: 'Upload as a YouTube Short. Defaults to private — flip to public from YouTube Studio when ready.',
+            onclick: async (e) => {
+              const btn = e.currentTarget;
+              const privacy = confirm('Upload as PRIVATE Short (visible only to you)?\n\nOK = private, Cancel = unlisted (anyone with the URL).')
+                ? 'private' : 'unlisted';
+              btn.disabled = true;
+              btn.textContent = '⏳ Uploading…';
+              try {
+                const r = await api('/api/posts/' + post.id + '/publish/youtube', {
+                  method: 'POST', body: { privacy },
+                });
+                toast('Uploaded · ' + (r.watchUrl ? 'opening YouTube' : 'check YouTube Studio'), 'success', 6000);
+                console.log('[youtube publish]', r);
+                if (r.watchUrl) window.open(r.watchUrl, '_blank', 'noopener');
+              } catch (err) {
+                toast(err.message, 'error');
+              } finally {
+                btn.disabled = false;
+                btn.textContent = '▶ Upload to YouTube';
+              }
+            },
+          }, '▶ Upload to YouTube')
+        : null,
       el('button', {
         class: 'btn btn-danger btn-sm',
         onclick: async () => {

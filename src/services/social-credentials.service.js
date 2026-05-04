@@ -98,6 +98,29 @@ function markNeedsReauth(id, reason) {
   `).run(String(reason || '').slice(0, 500), id);
 }
 
+/**
+ * Rotate the access_token in place after a refresh-token exchange. Keeps
+ * every other field on the row intact (account_id, name, handle, avatar,
+ * scopes, refresh_token) so the rotated row stays equivalent to what
+ * upsert would have produced. Used by publish services that lazily
+ * refresh expired tokens before each call rather than running a cron.
+ */
+function updateAccessToken(id, { access_token, expires_at = null, refresh_token, scopes = null }) {
+  if (!access_token) throw new Error('access_token required');
+  // refresh_token is optional — Google omits it on refresh responses, so
+  // we keep whatever was already stored. Pass an explicit string to
+  // overwrite (some providers do issue a new refresh_token on each refresh).
+  const sets = ['access_token = ?', 'expires_at = ?',
+                "status = 'active'", "last_refreshed_at = datetime('now')",
+                'last_error = NULL'];
+  const vals = [access_token, expires_at];
+  if (scopes != null)        { sets.splice(2, 0, 'scopes = ?');        vals.splice(2, 0, scopes); }
+  if (refresh_token != null) { sets.splice(2, 0, 'refresh_token = ?'); vals.splice(2, 0, refresh_token); }
+  vals.push(id);
+  prepare(`UPDATE social_credentials SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  return prepare('SELECT * FROM social_credentials WHERE id = ?').get(id);
+}
+
 /** Credentials that will expire within `days` days — used by refresh cron. */
 function listNearExpiry(days = 7) {
   const cutoff = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
@@ -126,6 +149,6 @@ function presentSafe(row) {
 
 module.exports = {
   upsert, getActive, listForOrg, remove,
-  markExpired, markNeedsReauth, listNearExpiry,
+  markExpired, markNeedsReauth, updateAccessToken, listNearExpiry,
   presentSafe,
 };
