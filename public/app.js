@@ -3213,9 +3213,12 @@ VIEWS.settings = async function settingsView(root, myGen) {
       // production audit clears `video.publish` for Direct Post.
       { key: 'tiktok',    label: 'TikTok',   icon: '🎵', provider: 'tiktok',
         desc: 'Generate AI vertical short videos and push them as drafts to your TikTok account. Production Direct Post arrives after TikTok audit.' },
-      // YouTube Shorts is still Phase 1 — Google Cloud project pending.
-      { key: 'youtube',   label: 'YouTube Shorts', icon: '▶', provider: 'youtube', comingSoon: true,
-        desc: 'Upload AI-generated Shorts directly to your YouTube channel. Requires Google Cloud OAuth setup.' },
+      // P4 Phase 2: YouTube OAuth wired (Google Cloud Hitrapost project,
+      // Testing mode). Shorts upload via YouTube Data API v3 (videos.insert
+      // resumable). Default quota = 10K units/day = ~6 uploads/day; quota
+      // increase request lands once we have real customer volume.
+      { key: 'youtube',   label: 'YouTube Shorts', icon: '▶', provider: 'youtube',
+        desc: 'Upload AI-generated vertical Shorts directly to your YouTube channel. Default quota covers ~6 uploads/day until we request an increase.' },
     ];
 
     for (const p of platforms) {

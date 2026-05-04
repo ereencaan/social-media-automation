@@ -224,11 +224,14 @@
 - [x] `PLATFORM_TONES.youtube_shorts` (clear hook in first 3s, descriptive hashtags for discovery)
 - [x] `youtube_handle` on brand profile (DB column + Brand UI input + buildBusinessBlock injection)
 - [x] Settings → Connections tile with "Coming soon" badge
-- [ ] (Phase 2) `src/services/oauth/youtube.oauth.js` (Google OAuth, scope `youtube.upload`)
-- [ ] (Phase 2) Resumable video upload to `/upload/youtube/v3/videos` with Shorts metadata (≤60s vertical, `#Shorts` tag)
-- [ ] (Phase 2) Quota request from Google (default 10K units/day = ~6 uploads/day; need increase for production)
-- [ ] (Phase 2) `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` env wired
-- [ ] (Phase 2) Image/video render pipeline → 9:16 vertical output (currently horizontal/square; Shorts + TikTok both need this)
+- [x] (Phase 2) `src/services/oauth/youtube.oauth.js` — Google OAuth with `access_type=offline` + `prompt=consent` so we always get a refresh_token; SCOPES include youtube.upload + youtube.readonly + openid/email/profile; channel info fetched via `youtube.com/v3/channels?mine=true` (channel id used as the credential row's account_id for stable upsert on reconnect)
+- [x] (Phase 2) `/api/connect/youtube/start` + `/api/connect/youtube/callback` wired in connect.routes; "no channel found" surfaces a clear error rather than persisting an unusable credential
+- [x] (Phase 2) Settings → YouTube Shorts tile drops Coming soon, Connect button live; brand-tinted SVG icon already in place from prior commit
+- [x] (Phase 2) `GOOGLE_OAUTH_CLIENT_ID` + `GOOGLE_OAUTH_CLIENT_SECRET` documented in .env.example, set on prod
+- [ ] (Phase 2.5) Resumable video upload via `/upload/youtube/v3/videos` with Shorts metadata (≤60s vertical, `#Shorts` tag) — `youtube.service.js`
+- [ ] (Phase 2 audit) Production OAuth verification — Testing mode caps at 100 users; verification needs demo video + privacy/terms (already live) + scope justification
+- [ ] (Phase 2 production) Quota increase request from Google (default 10K units/day = ~6 uploads/day across all customers; need increase for real volume)
+- [ ] (Phase 2.5) Image/video render pipeline → 9:16 vertical output (currently horizontal/square; Shorts + TikTok both need this)
 
 - [ ] **WhatsApp Business Cloud** plugin (DM ingest webhook, template messages)
 - [ ] **Google Business Profile** plugin (post, review reply, Q&A)

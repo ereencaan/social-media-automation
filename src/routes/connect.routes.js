@@ -8,6 +8,7 @@ const state = require('../services/oauth/state');
 const linkedinOAuth = require('../services/oauth/linkedin.oauth');
 const metaOAuth     = require('../services/oauth/meta.oauth');
 const tiktokOAuth   = require('../services/oauth/tiktok.oauth');
+const youtubeOAuth  = require('../services/oauth/youtube.oauth');
 const credsService  = require('../services/social-credentials.service');
 
 function feBase(req) {
@@ -192,6 +193,79 @@ router.get('/tiktok/callback', async (req, res) => {
     console.error('[connect/tiktok/callback]', err);
     res.redirect(uiCallbackUrl(req, {
       platform: 'tiktok', status: 'error', reason: err.message,
+    }));
+  }
+});
+
+// =========================================================================
+//   YouTube (Google OAuth + YouTube Data API v3 — upload Shorts)
+// =========================================================================
+router.get('/youtube/start', (req, res) => {
+  try {
+    if (!process.env.GOOGLE_OAUTH_CLIENT_ID || !process.env.GOOGLE_OAUTH_CLIENT_SECRET) {
+      return res.status(503).json({
+        error: 'YouTube integration is not configured on this server. Set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET.',
+      });
+    }
+    const stateToken = state.create(req, { platform: 'youtube', orgId: req.user.orgId });
+    const url = youtubeOAuth.buildAuthorizeUrl(stateToken);
+    res.json({ url });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/youtube/callback', async (req, res) => {
+  try {
+    if (req.query.error) {
+      return res.redirect(uiCallbackUrl(req, {
+        platform: 'youtube', status: 'error',
+        reason: req.query.error_description || req.query.error,
+      }));
+    }
+    const { platform, orgId } = state.verifyAndConsume(req, req.query.state);
+    if (platform !== 'youtube') throw new Error('State platform mismatch');
+
+    const token = await youtubeOAuth.exchangeCode(req.query.code);
+
+    // Fetch the user's YouTube channel for the display card. Some Google
+    // accounts have no channel yet — surface that as a clear error rather
+    // than silently storing a credential the upload flow can't use.
+    let channel = null;
+    try { channel = await youtubeOAuth.fetchChannelInfo(token.access_token); } catch (_) { /* non-fatal */ }
+    if (!channel) {
+      return res.redirect(uiCallbackUrl(req, {
+        platform: 'youtube', status: 'error',
+        reason: 'No YouTube channel found on this Google account. Create one at youtube.com first, then reconnect.',
+      }));
+    }
+
+    const expiresAt = token.expires_in
+      ? new Date(Date.now() + token.expires_in * 1000).toISOString()
+      : null;
+
+    credsService.upsert(orgId, 'youtube', {
+      account_id:         channel.id,
+      account_name:       channel.title || null,
+      account_handle:     channel.handle || null,
+      account_avatar_url: channel.thumbnail || null,
+      access_token:       token.access_token,
+      // Google only returns refresh_token on the first consent (with
+      // prompt=consent forcing it). If we somehow got an empty one we
+      // null it out so the refresh flow loudly fails rather than
+      // sending an empty string to the token endpoint.
+      refresh_token:      token.refresh_token || null,
+      token_type:         token.token_type || 'Bearer',
+      expires_at:         expiresAt,
+      refresh_expires_at: null, // Google refresh tokens don't expire on a fixed clock
+      scopes:             token.scope || youtubeOAuth.SCOPES.join(' '),
+    });
+
+    res.redirect(uiCallbackUrl(req, { platform: 'youtube', status: 'ok' }));
+  } catch (err) {
+    console.error('[connect/youtube/callback]', err);
+    res.redirect(uiCallbackUrl(req, {
+      platform: 'youtube', status: 'error', reason: err.message,
     }));
   }
 });
