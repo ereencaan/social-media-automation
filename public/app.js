@@ -3265,11 +3265,33 @@ function renderConnectedAccount(a, refresh) {
     ? (daysLeft !== null && daysLeft < 7 ? 'warn' : 'good')
     : (a.status === 'expired' || a.status === 'needs_reauth' ? 'bad' : 'warn');
 
+  // Meta avatar URLs (graph.facebook.com/.../picture) frequently 401 from
+  // a different origin or come back as expired signed URLs from the IG
+  // Graph API. Render the initial-letter fallback if the image fails to
+  // load so the row never shows a broken-image icon.
+  const initial = (a.account_name || a.account_handle || '?').replace(/^@/, '')[0].toUpperCase();
+  function makeAvatar() {
+    if (!a.account_avatar_url) {
+      return el('div', { class: 'conn-avatar conn-avatar-fallback' }, initial);
+    }
+    const img = el('img', {
+      src: a.account_avatar_url,
+      alt: '',
+      class: 'conn-avatar',
+      // referrerpolicy=no-referrer keeps FB/IG from rejecting the request
+      // because of cross-origin referrer header checks. Doesn't help if
+      // the URL has truly expired but eliminates the most common failure.
+      referrerpolicy: 'no-referrer',
+    });
+    img.onerror = () => {
+      const fb = el('div', { class: 'conn-avatar conn-avatar-fallback' }, initial);
+      img.replaceWith(fb);
+    };
+    return img;
+  }
+
   return el('div', { class: 'conn-account' },
-    a.account_avatar_url
-      ? el('img', { src: a.account_avatar_url, alt: '', class: 'conn-avatar' })
-      : el('div', { class: 'conn-avatar conn-avatar-fallback' },
-          (a.account_name || '?')[0].toUpperCase()),
+    makeAvatar(),
     el('div', { style: 'flex:1; min-width:0' },
       el('div', { style: 'font-weight:500; font-size:13px' }, a.account_name || a.account_handle || '(unnamed)'),
       el('div', { style: 'font-size:11px; color:var(--text-dim)' },
