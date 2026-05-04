@@ -215,9 +215,10 @@
 - [x] (Phase 2) `/api/connect/tiktok/start` + `/api/connect/tiktok/callback` wired in connect.routes; credentials persisted in social_credentials with platform=`tiktok`, `account_id=open_id`, scopes recorded for token-budget reasoning later
 - [x] (Phase 2) Settings → TikTok tile drops Coming soon, Connect button live; OAuth round-trip survives reconnect (open_id-keyed upsert)
 - [x] (Phase 2) `TIKTOK_CLIENT_KEY` + `TIKTOK_CLIENT_SECRET` documented in .env.example, set on prod
-- [ ] (Phase 2.5) Content Posting API publish — `tiktok.service.js` push_by_file Inbox mode (sandbox-friendly, video lands as draft for the creator)
+- [x] (Phase 2.5) Content Posting API publish — `tiktok.service.js` push_by_file Inbox mode shipped (init + single-chunk PUT + status fetch); 287 MB cap; manual "🎵 Push to TikTok" button on post preview
+- [x] (Phase 2.5d) `tiktok` registered in `scheduler.platformPosters` so the cron-driven publish path fans out to TikTok alongside IG/FB/LI
 - [ ] (Phase 2 audit) Direct Post (`video.publish` scope) — needs production audit + demo video
-- [ ] (Phase 2) Async video status callback handling (TikTok processes uploads asynchronously)
+- [ ] (Phase 2) Async video status callback handling (TikTok processes uploads asynchronously; current `fetchStatus` is fire-on-init only)
 
 **YouTube Shorts — Phase 1 shipped; Phase 2 needs Google Cloud project**
 - [x] `youtube_shorts` chip on the posts multi-platform selector + calendar plans
@@ -228,10 +229,12 @@
 - [x] (Phase 2) `/api/connect/youtube/start` + `/api/connect/youtube/callback` wired in connect.routes; "no channel found" surfaces a clear error rather than persisting an unusable credential
 - [x] (Phase 2) Settings → YouTube Shorts tile drops Coming soon, Connect button live; brand-tinted SVG icon already in place from prior commit
 - [x] (Phase 2) `GOOGLE_OAUTH_CLIENT_ID` + `GOOGLE_OAUTH_CLIENT_SECRET` documented in .env.example, set on prod
-- [ ] (Phase 2.5) Resumable video upload via `/upload/youtube/v3/videos` with Shorts metadata (≤60s vertical, `#Shorts` tag) — `youtube.service.js`
+- [x] (Phase 2.5) Resumable video upload via `/upload/youtube/v3/videos` with Shorts metadata (`#Shorts` always appended to description, title clipped to 100 chars, tags pulled from hashtag tokens) — `youtube.service.js`. Auto-refresh of expired access tokens with `needs_reauth` fallback when refresh fails. Default privacyStatus = `private` for the manual button, `public` for the cron-driven scheduler path. Manual "▶ Upload to YouTube" button opens the new Short in a new tab on success.
+- [x] (Phase 2.5d) `youtube_shorts` registered in `scheduler.platformPosters` — cron schedule publishes to YouTube alongside IG/FB/LI/TikTok
+- [x] (Phase 2.5c) Image/video render pipeline → 9:16 vertical: `flux.service.SIZES.tiktok / .youtube_shorts` = 1080×1920, `runway.service.RATIOS.tiktok / .youtube_shorts` = 720:1280
 - [ ] (Phase 2 audit) Production OAuth verification — Testing mode caps at 100 users; verification needs demo video + privacy/terms (already live) + scope justification
 - [ ] (Phase 2 production) Quota increase request from Google (default 10K units/day = ~6 uploads/day across all customers; need increase for real volume)
-- [ ] (Phase 2.5) Image/video render pipeline → 9:16 vertical output (currently horizontal/square; Shorts + TikTok both need this)
+- [ ] Per-platform render pass — currently we render once for the first platform; multi-platform posts (IG square + TikTok vertical on the same post) need two renders or a single 9:16 master with smart-crop fallback for square slots
 
 - [ ] **WhatsApp Business Cloud** plugin (DM ingest webhook, template messages)
 - [ ] **Google Business Profile** plugin (post, review reply, Q&A)

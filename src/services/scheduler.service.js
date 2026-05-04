@@ -3,6 +3,8 @@ const { prepare } = require('../config/database');
 const { postToInstagram } = require('./instagram.service');
 const { postToFacebook } = require('./facebook.service');
 const { postToLinkedIn } = require('./linkedin.service');
+const { postToTikTok } = require('./tiktok.service');
+const { postToYouTube } = require('./youtube.service');
 const { generateAndSavePost } = require('./post-factory.service');
 
 // ---- Plan item automation windows ---------------------------------------
@@ -29,7 +31,24 @@ const platformPosters = {
   },
   linkedin: (post) => {
     return postToLinkedIn(post.drive_url, post.caption, { orgId: post.org_id });
-  }
+  },
+  // P4 Phase 2.5d — short-form video platforms. Both pull the public
+  // media URL from drive_url (Cloudinary CDN) since that's the version
+  // TikTok / YouTube can fetch over the open internet. Captions on
+  // TikTok Inbox mode aren't accepted (creator types those in the
+  // app); YouTube uses the post's caption + hashtags via buildSnippet.
+  tiktok: (post) => {
+    return postToTikTok(post.drive_url || post.image_url, { orgId: post.org_id });
+  },
+  youtube_shorts: (post) => {
+    return postToYouTube(post, post.drive_url || post.image_url, {
+      orgId: post.org_id,
+      // Cron-driven schedule: default to public so the auto-published
+      // Short actually goes live. Manual publish from the UI keeps the
+      // private/unlisted prompt for review-first workflows.
+      privacy: 'public',
+    });
+  },
 };
 
 function logResult(postId, platform, status, response) {

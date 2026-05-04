@@ -6,10 +6,17 @@ function getKey() {
 }
 
 const SIZES = {
-  instagram: { width: 1024, height: 1024 },
-  facebook: { width: 1024, height: 768 },
-  linkedin: { width: 1024, height: 768 },
-  default: { width: 1024, height: 1024 }
+  instagram:      { width: 1024, height: 1024 },
+  facebook:       { width: 1024, height: 768 },
+  linkedin:       { width: 1024, height: 768 },
+  // 9:16 vertical for short-form video platforms. 1080x1920 matches the
+  // canonical Reels/Shorts/TikTok upload spec; both platforms accept
+  // larger inputs but downscale, so picking the right native size avoids
+  // the quality loss + lets us use the same image as a video poster
+  // frame later if needed.
+  tiktok:         { width: 1080, height: 1920 },
+  youtube_shorts: { width: 1080, height: 1920 },
+  default:        { width: 1024, height: 1024 },
 };
 
 async function generateImage(prompt, platform = 'default') {

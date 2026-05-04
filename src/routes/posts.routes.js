@@ -426,11 +426,11 @@ router.post('/:id/publish/tiktok', async (req, res) => {
   const post = getOwnedPost(req.params.id, req.user.orgId);
   if (!post) return res.status(404).json({ error: 'Post not found' });
 
-  // The posts schema stores video output URLs in image_url today (single
-  // media field for both image and video). Allow an explicit override
-  // for test runs where the post has only an image and we want to push
-  // an arbitrary mp4.
-  const videoUrl = (req.body && req.body.video_url) || post.image_url;
+  // Prefer drive_url (public Cloudinary/Drive CDN URL) over image_url
+  // (often a local /storage path) so TikTok can actually fetch the
+  // bytes. Body override always wins for test runs against arbitrary
+  // public mp4s.
+  const videoUrl = (req.body && req.body.video_url) || post.drive_url || post.image_url;
   if (!videoUrl) {
     return res.status(400).json({
       error: 'Post has no media URL and no video_url override was provided',
@@ -466,7 +466,8 @@ router.post('/:id/publish/youtube', async (req, res) => {
   const post = getOwnedPost(req.params.id, req.user.orgId);
   if (!post) return res.status(404).json({ error: 'Post not found' });
 
-  const videoUrl = (req.body && req.body.video_url) || post.image_url;
+  // Prefer the public CDN URL — same reasoning as the TikTok handler.
+  const videoUrl = (req.body && req.body.video_url) || post.drive_url || post.image_url;
   if (!videoUrl) {
     return res.status(400).json({
       error: 'Post has no media URL and no video_url override was provided',

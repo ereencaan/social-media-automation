@@ -8,10 +8,15 @@ function getKey() {
 }
 
 const RATIOS = {
-  instagram: '720:1280',
-  facebook: '1280:720',
-  linkedin: '1280:720',
-  default: '720:1280'
+  instagram:      '720:1280',
+  facebook:       '1280:720',
+  linkedin:       '1280:720',
+  // Same 9:16 vertical that IG Reels uses — TikTok and YouTube Shorts
+  // share the spec, so the orchestrator's per-platform pass can ask
+  // Runway for one render that satisfies all three.
+  tiktok:         '720:1280',
+  youtube_shorts: '720:1280',
+  default:        '720:1280',
 };
 
 function apiRequest(method, path, body) {
