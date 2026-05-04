@@ -1318,6 +1318,33 @@ VIEWS.posts = async function postsView(root, myGen) {
         ['video', 'Video / Reel (Runway)'],
       ].forEach(([v, t]) => formatSel.appendChild(el('option', { value: v }, t)));
 
+      // Duration select — only meaningful for video. Runway gen4.5 supports
+      // 5 and 10 second clips natively; longer durations need the
+      // multi-clip composer (P5) which isn't shipped yet. We hide this
+      // field when format=image so the user doesn't think it does
+      // anything for image generation.
+      const durationField = el('div', { class: 'field' },
+        el('label', {}, 'Duration',
+          (() => {
+            const s = el('select', { name: 'duration' });
+            [
+              ['5',  '5 seconds (default)'],
+              ['10', '10 seconds'],
+              // Longer options are intentionally absent until the P5
+              // multi-clip pipeline ships. Plan-tier gating will live
+              // there too (Starter 0, Pro 5/mo, Agency 50/mo).
+            ].forEach(([v, t]) => s.appendChild(el('option', { value: v }, t)));
+            return s;
+          })(),
+        ),
+      );
+      function syncDurationVisibility() {
+        durationField.style.display = formatSel.value === 'video' ? '' : 'none';
+      }
+      formatSel.addEventListener('change', syncDurationVisibility);
+      // Run once on initial render — image is the default, so hide on first paint.
+      Promise.resolve().then(syncDurationVisibility);
+
       const chipWrap = el('div', { class: 'chip-group' });
       [
         ['instagram',      '📷 Instagram'],
@@ -1346,6 +1373,10 @@ VIEWS.posts = async function postsView(root, myGen) {
           .map((c) => c.value);
         if (checked.some((p) => VERTICAL.includes(p)) && formatSel.value !== 'video') {
           formatSel.value = 'video';
+          // Programmatic value-set doesn't fire the 'change' event, so
+          // we dispatch one manually to wake up syncDurationVisibility
+          // and any other listeners hooked on the format select.
+          formatSel.dispatchEvent(new Event('change', { bubbles: true }));
           // Subtle hint so the operator notices the auto-route. Toast
           // rather than alert so it doesn't block the form.
           if (typeof toast === 'function') {
@@ -1357,6 +1388,7 @@ VIEWS.posts = async function postsView(root, myGen) {
       return [
         el('div', { class: 'field' }, el('label', {}, 'Platforms', chipWrap)),
         el('div', { class: 'field' }, el('label', {}, 'Format', formatSel)),
+        durationField,
       ];
     })(),
   ));
@@ -1411,6 +1443,11 @@ VIEWS.posts = async function postsView(root, myGen) {
     const variants = 1;
     const endpoint = format === 'video' ? '/api/posts/generate-video' : '/api/posts/generate';
     const promptText = fd.get('prompt');
+    // Duration only matters for video; backend ignores it on /generate.
+    // Clamp to the values Runway gen4.5 actually supports (5 or 10) so
+    // a tampered form value can't slip through to the API.
+    const rawDuration = Number(fd.get('duration')) || 5;
+    const duration = rawDuration === 10 ? 10 : 5;
 
     // Reset the form immediately so the user can keep working / generate
     // another / navigate elsewhere. The fetch runs detached.
@@ -1425,7 +1462,7 @@ VIEWS.posts = async function postsView(root, myGen) {
     // list lazily via a route nudge.
     api(endpoint, {
       method: 'POST',
-      body: { prompt: promptText, platforms, onBrand, qualityGate, variants },
+      body: { prompt: promptText, platforms, onBrand, qualityGate, variants, duration },
     }).then((result) => {
       const msg = result.quality
         ? `Post ready — quality ${result.quality.score}/100${result.quality.refined ? ' (auto-refined)' : ''}`

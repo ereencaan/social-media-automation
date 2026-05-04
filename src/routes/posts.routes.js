@@ -66,7 +66,11 @@ router.post('/generate-video',
   enforceQuota('ai_calls'),
   async (req, res) => {
   try {
-    const { prompt, platforms = ['instagram'], duration = 5, onBrand = true, variants = 1, qualityGate = true } = req.body;
+    let { prompt, platforms = ['instagram'], duration = 5, onBrand = true, variants = 1, qualityGate = true } = req.body;
+    // Clamp to the durations Runway gen4.5 supports natively (5 or 10).
+    // Longer reels need the multi-clip composer (P5) — until that ships,
+    // anything else from the UI / a tampered request gets snapped to 5.
+    duration = (Number(duration) === 10) ? 10 : 5;
     if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
 
     const brand = prepare('SELECT * FROM brand_settings WHERE org_id = ?').get(req.user.orgId);
