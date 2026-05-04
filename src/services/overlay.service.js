@@ -220,15 +220,22 @@ async function applyImageOverlay(imageBuffer, brand) {
  * Apply branding overlay to a video (requires FFmpeg)
  */
 async function applyVideoOverlay(videoBuffer, brand) {
-  if (!brand) return videoBuffer;
+  if (!brand) {
+    console.warn('[Overlay/video] no brand, skipping');
+    return videoBuffer;
+  }
 
   const hasLogo = !!brand.logo_url;
   const items = buildContactItems(brand);
-  if (!hasLogo && !items.length) return videoBuffer;
+  console.log('[Overlay/video] start hasLogo=%s contactItems=%d', hasLogo, items.length);
+  if (!hasLogo && !items.length) {
+    console.warn('[Overlay/video] no logo + 0 contact items, returning untouched buffer');
+    return videoBuffer;
+  }
 
   const ffmpegAvailable = await checkFFmpeg();
   if (!ffmpegAvailable) {
-    console.warn('[Overlay] FFmpeg not found, skipping video overlay');
+    console.warn('[Overlay/video] FFmpeg not found, skipping video overlay');
     return videoBuffer;
   }
 
@@ -288,7 +295,15 @@ async function applyVideoOverlay(videoBuffer, brand) {
     args.push('-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-c:a', 'copy', outputPath);
 
     await runFFmpeg(args);
-    return fs.readFileSync(outputPath);
+    const outBuf = fs.readFileSync(outputPath);
+    console.log('[Overlay/video] done inputBytes=%d outputBytes=%d', videoBuffer.length, outBuf.length);
+    return outBuf;
+  } catch (err) {
+    // Surface ffmpeg failures instead of letting the route 500 with a
+    // generic Cloudinary error later. We still re-throw so the route
+    // catch block sets the proper response.
+    console.error('[Overlay/video] ffmpeg failed:', err.message);
+    throw err;
   } finally {
     [inputPath, outputPath, logoPath, barPath, filterFilePath].forEach((f) => {
       if (f && fs.existsSync(f)) {

@@ -56,14 +56,61 @@ function apiRequest(method, path, body) {
 async function generateVideo(prompt, platform = 'instagram', duration = 5) {
   const ratio = RATIOS[platform] || RATIOS.default;
 
+  // Runway gen4.5 has a hard time honoring "no text" when the prompt
+  // mentions a brand or platform names — it ends up rendering misspelled
+  // signage / fake UI screens in-scene. Two-pronged defence:
+  //   1. Strip brand/platform tokens from the incoming prompt (caller
+  //      should also do this, but defence-in-depth — Claude sometimes
+  //      slips brand names back in).
+  //   2. Stronger no-text directive that explicitly bans signs, screens,
+  //      logos, watermarks, and UI mockups inside the scene. The brand
+  //      logo + contact strip are added as a video-overlay pass *after*
+  //      Runway, so we want a clean visual canvas underneath.
+  const sanitised = stripBrandTokens(prompt);
+  const promptText = `Social media reel: ${sanitised}. ` +
+    `Professional, eye-catching, suitable for ${platform}. ` +
+    `Photorealistic visual scene only. ` +
+    `Absolutely NO text, NO writing, NO letters, NO words, NO signs, ` +
+    `NO logos, NO watermarks, NO mockup UI, NO platform icons inside the scene. ` +
+    `If a screen is shown it must be blank or display abstract patterns only.`;
+
+  console.log('[Runway] generateVideo start ratio=%s duration=%s', ratio, duration);
   const task = await apiRequest('POST', '/text_to_video', {
     model: 'gen4.5',
-    promptText: `Social media reel: ${prompt}. Professional, eye-catching, suitable for ${platform}. No text or words in the video.`,
+    promptText,
     ratio,
-    duration
+    duration,
   });
+  console.log('[Runway] task created id=%s', task.id);
 
-  return await pollTask(task.id);
+  const result = await pollTask(task.id);
+  console.log('[Runway] task done id=%s status=%s url=%s', task.id, result.status, result.url ? 'present' : 'missing');
+  return result;
+}
+
+// Strip the obvious brand-name and platform-name tokens that cause
+// Runway to bake misspelled text into the scene. We run this both on
+// the caller's pre-processed prompt and inside generateVideo so a
+// brand name that slips through Claude is still scrubbed before the
+// model sees it. Replaces the token with "the brand" so the sentence
+// stays grammatical.
+function stripBrandTokens(prompt) {
+  if (!prompt || typeof prompt !== 'string') return prompt;
+  // Common platform names that also leak into prompts and become fake UI.
+  const PLATFORMS = ['Instagram', 'Facebook', 'LinkedIn', 'TikTok', 'YouTube', 'Twitter', 'Threads'];
+  let out = prompt;
+  // Replace the configured business name (set by caller as RUNWAY_STRIP env)
+  // — the env hook lets ops tighten the filter without a redeploy.
+  const extra = (process.env.RUNWAY_STRIP_TOKENS || '').split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+  for (const token of extra) {
+    out = out.replace(new RegExp(`\\b${token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi'), 'the brand');
+  }
+  // Soften platform mentions so Runway doesn't mock up an Instagram feed
+  // when the operator says "show our content as Instagram-ready".
+  for (const p of PLATFORMS) {
+    out = out.replace(new RegExp(`\\b${p}\\b`, 'g'), 'social');
+  }
+  return out;
 }
 
 async function generateVideoFromImage(imageUrl, prompt, platform = 'instagram', duration = 5) {

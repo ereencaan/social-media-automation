@@ -80,8 +80,20 @@ router.post('/generate-video',
       business: brand, onBrand, variants, qualityGate,
     });
 
-    // 2. Generate video with Runway
-    const video = await generateVideo(content.imagePrompt || prompt, platforms[0], duration);
+    // 2. Generate video with Runway. Strip the business name from the
+    //    image prompt before handing it to Runway — Claude tends to slot
+    //    the brand name into the scene description ("HITRATECH banner",
+    //    "Hitratech sign") and Runway then bakes misspelled text into
+    //    the video. The overlay pass adds the real logo + contact strip
+    //    on top, so the underlying scene should stay text-free.
+    const rawImagePrompt = content.imagePrompt || prompt;
+    const safeImagePrompt = brand && brand.business_name
+      ? rawImagePrompt.replace(
+          new RegExp(`\\b${brand.business_name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\b`, 'gi'),
+          'the brand',
+        )
+      : rawImagePrompt;
+    const video = await generateVideo(safeImagePrompt, platforms[0], duration);
 
     // 3. Apply branding overlay + upload to Cloudinary
     let cloudResult;
