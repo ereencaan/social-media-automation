@@ -12,6 +12,8 @@ const { generateAndSavePost } = require('../services/post-factory.service');
 const { uploadImage, uploadFromUrl } = require('../services/cloudinary.service');
 const { listTemplates, renderTemplate, renderVideo } = require('../services/templated.service');
 const { generateVideo, generateVideoFromImage } = require('../services/runway.service');
+const { composeReel } = require('../services/video-composer.service');
+const { getPlan, isUnlimited } = require('../config/plans');
 const { applyImageOverlay, applyVideoOverlay } = require('../services/overlay.service');
 const { schedulePost, cancelSchedule, publishPost } = require('../services/scheduler.service');
 const { postToTikTok, fetchStatus: fetchTikTokStatus } = require('../services/tiktok.service');
@@ -87,8 +89,26 @@ router.post('/generate-video',
   async (req, res) => {
   try {
     let { prompt, platforms = ['instagram'], duration = 5, onBrand = true, variants = 1, qualityGate = true, brand_id: brandIdRaw } = req.body;
-    duration = (Number(duration) === 10) ? 10 : 5;
     if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
+
+    // Allowed durations: 5/10 (single Runway clip) and 15/30/60 (multi-clip
+    // composer). Anything else snaps to 5 so a tampered request can't
+    // sneak through to Runway with a value that 400s the API call.
+    duration = Number(duration);
+    if (![5, 10, 15, 30, 60].includes(duration)) duration = 5;
+
+    // Plan-tier gating on max reel length. Pro = 30s, Agency = 60s,
+    // Enterprise = unlimited. requirePlan('pro') has already filtered
+    // out free / starter at the middleware layer above.
+    const plan = getPlan(req.user.plan || 'pro');
+    const cap = plan.features && plan.features.video_max_seconds;
+    if (cap != null && cap !== -1 && duration > cap) {
+      return res.status(402).json({
+        error: `Your ${plan.name} plan caps reels at ${cap}s. Upgrade for longer reels.`,
+        cap,
+        requested: duration,
+      });
+    }
 
     const brandId = brandIdRaw ? String(brandIdRaw) : null;
 
@@ -119,17 +139,40 @@ router.post('/generate-video',
             )
           : rawImagePrompt;
 
-        const video = await generateVideo(safeImagePrompt, platforms[0], duration);
+        // Single-clip path (≤10s) → existing Runway one-shot.
+        // Multi-clip path (>10s) → P5 video composer: storyboard +
+        // parallel Runway scenes + ffmpeg xfade concat. The composer
+        // returns a Buffer ready for the brand-overlay pass, so the
+        // downstream "wrap with logo + contact strip + Cloudinary
+        // upload" code is identical to the single-clip path.
+        let preOverlayBuffer = null;
+        let runwayUrlForRecord = null;
+        if (duration <= 10) {
+          const video = await generateVideo(safeImagePrompt, platforms[0], duration);
+          runwayUrlForRecord = video.url;
+          preOverlayBuffer = await downloadImage(video.url);
+        } else {
+          const composed = await composeReel({
+            brief:           safeImagePrompt,
+            durationSeconds: duration,
+            platform:        platforms[0],
+            brand,
+          });
+          preOverlayBuffer = composed.buffer;
+          // No single Runway URL for multi-clip reels — leave image_url
+          // null and let the operator find the post via drive_url
+          // (Cloudinary CDN URL).
+        }
 
+        const { uploadVideo } = require('../services/cloudinary.service');
         let cloudResult;
         if (brand && (brand.logo_url || brand.phone || brand.website)) {
-          const videoBuffer = await downloadImage(video.url);
-          const overlaidBuffer = await applyVideoOverlay(videoBuffer, brand);
-          const { uploadVideo } = require('../services/cloudinary.service');
+          const overlaidBuffer = await applyVideoOverlay(preOverlayBuffer, brand);
           cloudResult = await uploadVideo(overlaidBuffer, `reel_${Date.now()}.mp4`);
         } else {
-          cloudResult = await uploadFromUrl(video.url, { isVideo: true, publicId: `reel_${Date.now()}` });
+          cloudResult = await uploadVideo(preOverlayBuffer, `reel_${Date.now()}.mp4`);
         }
+        const video = { url: runwayUrlForRecord || cloudResult.publicUrl };
 
         const hashtags = content.hashtags.map(t => `#${t}`).join(' ');
         prepare(`

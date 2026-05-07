@@ -1335,12 +1335,18 @@ VIEWS.posts = async function postsView(root, myGen) {
         el('label', {}, 'Duration',
           (() => {
             const s = el('select', { name: 'duration' });
+            // Single-clip Runway range (5/10) and multi-clip composer
+            // range (15/30/60). The backend gates 15/30/60 against
+            // plan.video_max_seconds — Starter/Free 0s (video tier
+            // blocked entirely), Pro caps at 30s, Agency at 60s.
+            // Over-plan picks return 402 and the toast surfaces the
+            // exact cap so the operator knows what to do.
             [
-              ['5',  '5 seconds (default)'],
-              ['10', '10 seconds'],
-              // Longer options are intentionally absent until the P5
-              // multi-clip pipeline ships. Plan-tier gating will live
-              // there too (Starter 0, Pro 5/mo, Agency 50/mo).
+              ['5',  '5 seconds (single clip)'],
+              ['10', '10 seconds (single clip)'],
+              ['15', '15 seconds (3-clip reel)'],
+              ['30', '30 seconds (6-clip reel)'],
+              ['60', '60 seconds (12-clip reel)'],
             ].forEach(([v, t]) => s.appendChild(el('option', { value: v }, t)));
             return s;
           })(),

@@ -17,7 +17,10 @@ const PLANS = {
     // The post-signup default before a plan is chosen. Generous enough to
     // try the product, tight enough that it isn't a usable production tier.
     quotas: { posts: 5, ai_calls: 25, leads: 50 },
-    features: { socials: 1, seats: 1, video: 0, white_label: false },
+    // features.video    = monthly video count cap (0 = no video at all)
+    // features.video_max_seconds = max single-reel duration in seconds
+    //                              (-1 = unlimited, only on Enterprise)
+    features: { socials: 1, seats: 1, video: 0, video_max_seconds: 0, white_label: false },
     priceMonthlyGbp: 0,
     priceYearlyGbp: 0,
     stripePriceMonthly: null,
@@ -29,7 +32,7 @@ const PLANS = {
     name: 'Starter',
     rank: TIER_RANK.starter,
     quotas: { posts: 30, ai_calls: 100, leads: 500 },
-    features: { socials: 3, seats: 1, video: 0, white_label: false },
+    features: { socials: 3, seats: 1, video: 0, video_max_seconds: 0, white_label: false },
     priceMonthlyGbp: 29,
     priceYearlyGbp: 290,
     stripePriceMonthly: process.env.STRIPE_PRICE_STARTER_MONTHLY || null,
@@ -41,7 +44,8 @@ const PLANS = {
     name: 'Pro',
     rank: TIER_RANK.pro,
     quotas: { posts: 120, ai_calls: 500, leads: 5000 },
-    features: { socials: 10, seats: 1, video: 5, white_label: false },
+    // 5 videos/month, max 30s each (covers single-clip + ~6-clip multi-clip reels)
+    features: { socials: 10, seats: 1, video: 5, video_max_seconds: 30, white_label: false },
     priceMonthlyGbp: 79,
     priceYearlyGbp: 790,
     stripePriceMonthly: process.env.STRIPE_PRICE_PRO_MONTHLY || null,
@@ -54,7 +58,8 @@ const PLANS = {
     rank: TIER_RANK.agency,
     // Unlimited = -1 sentinel so the middleware can short-circuit.
     quotas: { posts: -1, ai_calls: -1, leads: 50000 },
-    features: { socials: 50, seats: 5, video: 50, white_label: true },
+    // 50 videos/month, max 60s each (full Shorts / TikTok / Reel duration)
+    features: { socials: 50, seats: 5, video: 50, video_max_seconds: 60, white_label: true },
     priceMonthlyGbp: 199,
     priceYearlyGbp: 1990,
     stripePriceMonthly: process.env.STRIPE_PRICE_AGENCY_MONTHLY || null,
@@ -67,7 +72,7 @@ const PLANS = {
     rank: TIER_RANK.enterprise,
     // Quotas managed manually via the admin tools / contract terms.
     quotas: { posts: -1, ai_calls: -1, leads: -1 },
-    features: { socials: -1, seats: -1, video: -1, white_label: true, sso: true, sla: true },
+    features: { socials: -1, seats: -1, video: -1, video_max_seconds: -1, white_label: true, sso: true, sla: true },
     priceMonthlyGbp: null,    // custom
     priceYearlyGbp: null,
     stripePriceMonthly: null,
