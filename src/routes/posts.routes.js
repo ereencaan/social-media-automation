@@ -38,14 +38,18 @@ router.post('/generate',
   enforceQuota('ai_calls'),
   async (req, res) => {
     try {
-      const { prompt, platforms = ['instagram'], onBrand = true, variants = 1, qualityGate = true } = req.body;
+      const { prompt, platforms = ['instagram'], onBrand = true, variants = 1, qualityGate = true, brand_id: brandIdRaw } = req.body;
       if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
+
+      // Resolve the brand the operator picked on the form. Empty / missing
+      // → null and the factory falls back to the org's default brand.
+      const brandId = brandIdRaw ? String(brandIdRaw) : null;
 
       const id = generateId();
       prepare(`
-        INSERT INTO posts (id, org_id, user_id, prompt, platforms, status)
-        VALUES (?, ?, ?, ?, ?, 'generating')
-      `).run(id, req.user.orgId, req.user.id, prompt, JSON.stringify(platforms));
+        INSERT INTO posts (id, org_id, user_id, prompt, platforms, status, brand_id)
+        VALUES (?, ?, ?, ?, ?, 'generating', ?)
+      `).run(id, req.user.orgId, req.user.id, prompt, JSON.stringify(platforms), brandId);
 
       res.status(202).json({ id, status: 'generating' });
 
@@ -56,7 +60,7 @@ router.post('/generate',
           await generateAndSavePost({
             orgId: req.user.orgId, userId: req.user.id,
             prompt, platforms, onBrand, variants, qualityGate,
-            existingId: id,
+            existingId: id, brandId,
           });
           usage.increment(req.user.orgId, 'posts');
           usage.increment(req.user.orgId, 'ai_calls');
@@ -82,21 +86,26 @@ router.post('/generate-video',
   enforceQuota('ai_calls'),
   async (req, res) => {
   try {
-    let { prompt, platforms = ['instagram'], duration = 5, onBrand = true, variants = 1, qualityGate = true } = req.body;
+    let { prompt, platforms = ['instagram'], duration = 5, onBrand = true, variants = 1, qualityGate = true, brand_id: brandIdRaw } = req.body;
     duration = (Number(duration) === 10) ? 10 : 5;
     if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
 
+    const brandId = brandIdRaw ? String(brandIdRaw) : null;
+
     const id = generateId();
     prepare(`
-      INSERT INTO posts (id, org_id, user_id, prompt, platforms, status)
-      VALUES (?, ?, ?, ?, ?, 'generating')
-    `).run(id, req.user.orgId, req.user.id, prompt, JSON.stringify(platforms));
+      INSERT INTO posts (id, org_id, user_id, prompt, platforms, status, brand_id)
+      VALUES (?, ?, ?, ?, ?, 'generating', ?)
+    `).run(id, req.user.orgId, req.user.id, prompt, JSON.stringify(platforms), brandId);
 
     res.status(202).json({ id, status: 'generating' });
 
     setImmediate(async () => {
       try {
-        const brand = prepare('SELECT * FROM brand_settings WHERE org_id = ?').get(req.user.orgId);
+        // Multi-brand: explicit brand_id wins, else default brand.
+        const brand = brandId
+          ? prepare('SELECT * FROM brand_settings WHERE id = ? AND org_id = ?').get(brandId, req.user.orgId)
+          : prepare('SELECT * FROM brand_settings WHERE org_id = ? AND is_default = 1').get(req.user.orgId);
 
         const { content, quality } = await orchestrateContent(prompt, platforms, {
           business: brand, onBrand, variants, qualityGate,

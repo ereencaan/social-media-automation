@@ -77,6 +77,10 @@ const State = {
   // Background jobs that should outlive view navigation. Keyed by a uuid.
   // Each entry: { id, label, status: 'running'|'done'|'error', startedAt }
   activeJobs: new Map(),
+  // Multi-brand: which brand the operator is currently editing on the
+  // Brand page. Persists across re-renders so a Save → reopen round-trip
+  // keeps editing the same brand. Reset to null on logout.
+  editingBrandId: null,
 };
 
 // ---- background-job UI ----------------------------------------------------
@@ -1188,11 +1192,15 @@ function closeEmailComposer() {
 VIEWS.posts = async function postsView(root, myGen) {
   root.innerHTML = '';
 
-  // Pre-fetch the brand so we know whether a business profile is set up
-  let brand = {};
-  try { brand = await api('/api/brand'); } catch {}
+  // Pre-fetch the brand list so we know whether at least one business
+  // profile is set up AND can render the multi-brand selector below.
+  let allBrands = [];
+  try { allBrands = await api('/api/brand/list'); } catch {}
   // Bail if the user navigated elsewhere while we were awaiting
   if (stale(myGen)) return;
+  allBrands = Array.isArray(allBrands) ? allBrands : [];
+  const defaultBrand = allBrands.find((b) => b.is_default) || allBrands[0] || {};
+  const brand = defaultBrand;
   const hasBizProfile = !!(brand.business_name || brand.business_description || brand.industry);
 
   // Generator card
@@ -1385,7 +1393,24 @@ VIEWS.posts = async function postsView(root, myGen) {
         }
       });
 
+      // Brand selector — multi-brand workspaces pick which brand the
+      // post is generated against (drives caption tone, contact strip,
+      // reviewer scoring). Hidden when there's only one brand to keep
+      // the form lean for solo workspaces.
+      const brandField = (() => {
+        const sel = el('select', { name: 'brand_id' });
+        allBrands.forEach((b) => {
+          const opt = el('option', { value: b.id }, (b.is_default ? '⭐ ' : '') + (b.name || 'Untitled'));
+          if (b.id === defaultBrand.id) opt.selected = true;
+          sel.appendChild(opt);
+        });
+        const wrap = el('div', { class: 'field' }, el('label', {}, 'Brand', sel));
+        if (allBrands.length <= 1) wrap.style.display = 'none';
+        return wrap;
+      })();
+
       return [
+        brandField,
         el('div', { class: 'field' }, el('label', {}, 'Platforms', chipWrap)),
         el('div', { class: 'field' }, el('label', {}, 'Format', formatSel)),
         durationField,
@@ -1464,9 +1489,10 @@ VIEWS.posts = async function postsView(root, myGen) {
     // heavy work in the background, and flips post.status from 'generating'
     // to 'draft' (success) or 'failed' (error) when done. We poll for that
     // transition so Cloudflare's edge timeout can never 524 us.
+    const brand_id = fd.get('brand_id') || null;
     api(endpoint, {
       method: 'POST',
-      body: { prompt: promptText, platforms, onBrand, qualityGate, variants, duration },
+      body: { prompt: promptText, platforms, onBrand, qualityGate, variants, duration, brand_id },
     }).then((accepted) => {
       // Older synchronous API path returns the full post + quality on the
       // first response. Detect by presence of caption / quality.
@@ -2632,12 +2658,122 @@ function statusBadgeClass(status) {
 // =======================================================================
 VIEWS.brand = async function brandView(root, myGen) {
   root.innerHTML = '<div class="loading"></div>';
-  let brand = {};
-  try { brand = await api('/api/brand'); } catch (e) { toast(e.message, 'error'); }
+
+  // Multi-brand: load every brand for the org so the user can switch
+  // between them. selectedBrandId persists across re-renders within a
+  // session so a "Save → reopen" round-trip keeps editing the same brand.
+  let brands = [];
+  try { brands = await api('/api/brand/list'); } catch (e) { toast(e.message, 'error'); }
   if (stale(myGen)) return;
-  brand = brand || {};
+  brands = Array.isArray(brands) ? brands : [];
+  if (!brands.length) {
+    // /list ensures a default brand exists even on a fresh org, so this
+    // branch only fires if the API itself errored. Surface a clean
+    // message instead of letting the rest of the view explode.
+    root.innerHTML = '';
+    root.appendChild(el('div', { class: 'card empty-state' },
+      el('h3', {}, 'No brands found'),
+      el('p', {}, 'Try refreshing — your default brand should appear here.'),
+    ));
+    return;
+  }
+  // selectedBrandId is module-scoped (declared near the top of the file).
+  // If the previously-selected brand no longer exists (e.g. deleted from
+  // another tab) fall back to the default.
+  let selectedId = State.editingBrandId && brands.find((b) => b.id === State.editingBrandId)
+    ? State.editingBrandId
+    : (brands.find((b) => b.is_default) || brands[0]).id;
+  State.editingBrandId = selectedId;
+  const brand = brands.find((b) => b.id === selectedId) || brands[0];
 
   root.innerHTML = '';
+
+  // ---- BRAND SWITCHER ----
+  const switcherCard = el('div', { class: 'card' });
+  switcherCard.appendChild(el('div', { class: 'section-header' },
+    el('h2', {}, 'Brand'),
+    el('div', { class: 'section-sub' }, 'Pick which brand profile to edit, or create a new one. Posts pick up the brand selected on Generate.'),
+  ));
+  const switcherRow = el('div', { style: 'display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:8px' });
+  // Brand picker
+  const brandSelect = el('select', { style: 'flex:1; min-width:200px' });
+  brands.forEach((b) => {
+    const opt = el('option', { value: b.id }, (b.is_default ? '⭐ ' : '') + (b.name || 'Untitled'));
+    if (b.id === selectedId) opt.selected = true;
+    brandSelect.appendChild(opt);
+  });
+  brandSelect.onchange = () => {
+    State.editingBrandId = brandSelect.value;
+    navigate('brand', { replace: true });
+  };
+  switcherRow.appendChild(brandSelect);
+
+  // Make default
+  if (!brand.is_default) {
+    switcherRow.appendChild(el('button', {
+      class: 'btn btn-sm',
+      onclick: async () => {
+        try {
+          await api('/api/brand/' + brand.id, { method: 'PUT', body: { is_default: true } });
+          toast('Default brand updated', 'success');
+          navigate('brand', { replace: true });
+        } catch (e) { toast(e.message, 'error'); }
+      },
+    }, '⭐ Make default'));
+  }
+
+  // New brand
+  switcherRow.appendChild(el('button', {
+    class: 'btn btn-sm',
+    onclick: async () => {
+      const name = (prompt('Name for the new brand?') || '').trim();
+      if (!name) return;
+      try {
+        const created = await api('/api/brand', { method: 'POST', body: { name } });
+        State.editingBrandId = created.id;
+        toast('Brand created — fill in the profile to get good AI output', 'success');
+        navigate('brand', { replace: true });
+      } catch (e) { toast(e.message, 'error'); }
+    },
+  }, '+ New brand'));
+
+  // Delete (disabled when this is the default — the API also rejects)
+  if (!brand.is_default) {
+    switcherRow.appendChild(el('button', {
+      class: 'btn btn-danger btn-sm',
+      onclick: async () => {
+        if (!confirm(`Delete brand "${brand.name}"? Posts already created against it stay; new gens will use the default brand.`)) return;
+        try {
+          await api('/api/brand/' + brand.id, { method: 'DELETE' });
+          State.editingBrandId = null;
+          toast('Brand deleted', 'success');
+          navigate('brand', { replace: true });
+        } catch (e) { toast(e.message, 'error'); }
+      },
+    }, 'Delete'));
+  }
+  switcherCard.appendChild(switcherRow);
+
+  // Inline rename
+  const renameRow = el('div', { style: 'display:flex; gap:10px; align-items:center; margin-top:10px' });
+  const renameInput = el('input', { type: 'text', value: brand.name || '', placeholder: 'Brand name', style: 'flex:1' });
+  const renameBtn = el('button', {
+    class: 'btn btn-sm',
+    onclick: async () => {
+      const newName = renameInput.value.trim();
+      if (!newName || newName === brand.name) return;
+      try {
+        await api('/api/brand/' + brand.id, { method: 'PUT', body: { name: newName } });
+        toast('Renamed', 'success');
+        navigate('brand', { replace: true });
+      } catch (e) { toast(e.message, 'error'); }
+    },
+  }, 'Rename');
+  renameRow.appendChild(renameInput);
+  renameRow.appendChild(renameBtn);
+  switcherCard.appendChild(renameRow);
+
+  root.appendChild(switcherCard);
 
   // ---- LOGO CARD ----
   const logoCard = el('div', { class: 'card' });
@@ -2704,7 +2840,10 @@ VIEWS.brand = async function brandView(root, myGen) {
     const form = new FormData();
     form.append('logo', file);
     try {
-      const res = await fetch('/api/brand/logo', {
+      // Multi-brand: include the currently-selected brand id so the
+      // upload lands on the right brand (logo + delete handlers default
+      // to org's default brand otherwise).
+      const res = await fetch('/api/brand/logo?brand_id=' + encodeURIComponent(brand.id), {
         method: 'POST',
         credentials: 'include',
         body: form,
@@ -2727,7 +2866,7 @@ VIEWS.brand = async function brandView(root, myGen) {
     e.stopPropagation();
     if (!confirm('Remove logo?')) return;
     try {
-      await api('/api/brand/logo', { method: 'DELETE' });
+      await api('/api/brand/logo?brand_id=' + encodeURIComponent(brand.id), { method: 'DELETE' });
       clearPreview();
       toast('Logo removed', 'success');
     } catch (err) { toast(err.message, 'error'); }
@@ -2819,7 +2958,7 @@ VIEWS.brand = async function brandView(root, myGen) {
     const fd = new FormData(form);
     const body = Object.fromEntries(fd.entries());
     try {
-      await api('/api/brand', { method: 'PUT', body });
+      await api('/api/brand/' + brand.id, { method: 'PUT', body });
       toast('Brand saved', 'success');
     } catch (err) { toast(err.message, 'error'); }
   };
@@ -2987,7 +3126,7 @@ VIEWS.brand = async function brandView(root, myGen) {
     const fd = new FormData(bizForm);
     const body = Object.fromEntries(fd.entries());
     try {
-      await api('/api/brand', { method: 'PUT', body });
+      await api('/api/brand/' + brand.id, { method: 'PUT', body });
       toast('Business profile saved', 'success');
     } catch (err) { toast(err.message, 'error'); }
   };

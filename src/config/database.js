@@ -139,7 +139,15 @@ async function init() {
   // ---- brand settings (one row per org) ---------------------------------
   db.run(`
     CREATE TABLE IF NOT EXISTS brand_settings (
-      org_id             TEXT PRIMARY KEY REFERENCES orgs(id) ON DELETE CASCADE,
+      -- Multi-brand schema: each row is one brand profile, multiple per
+      -- org are allowed (workspace can carry e.g. an IT-consultancy
+      -- brand AND a SaaS-product brand). Exactly one row per org has
+      -- is_default=1 — it's the brand the post pipeline auto-uses when
+      -- the caller doesn't pass an explicit brand_id.
+      id                 TEXT PRIMARY KEY,
+      org_id             TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+      name               TEXT,
+      is_default         INTEGER NOT NULL DEFAULT 0,
       logo_url           TEXT,
       logo_cloudinary_id TEXT,
       phone              TEXT,
@@ -153,6 +161,54 @@ async function init() {
       updated_at         TEXT DEFAULT (datetime('now'))
     )
   `);
+  db.run('CREATE INDEX IF NOT EXISTS idx_brand_settings_org ON brand_settings(org_id)');
+
+  // Legacy schema upgrade: prior versions used (org_id PRIMARY KEY) which
+  // capped the workspace at one brand. Detect by the absence of an `id`
+  // column on the existing table and rebuild — copy data into a new
+  // table with the current schema, drop the old, rename. This runs once;
+  // subsequent boots see `id` and skip the rebuild.
+  const preBrandCols = db.exec("PRAGMA table_info(brand_settings)")[0]?.values.map(r => r[1]) || [];
+  if (!preBrandCols.includes('id')) {
+    db.run('ALTER TABLE brand_settings RENAME TO brand_settings_legacy');
+    db.run(`
+      CREATE TABLE brand_settings (
+        id                 TEXT PRIMARY KEY,
+        org_id             TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+        name               TEXT,
+        is_default         INTEGER NOT NULL DEFAULT 0,
+        logo_url           TEXT,
+        logo_cloudinary_id TEXT,
+        phone              TEXT,
+        whatsapp           TEXT,
+        website            TEXT,
+        instagram_handle   TEXT,
+        facebook_handle    TEXT,
+        linkedin_handle    TEXT,
+        overlay_position   TEXT,
+        primary_color      TEXT,
+        updated_at         TEXT DEFAULT (datetime('now'))
+      )
+    `);
+    db.run('CREATE INDEX IF NOT EXISTS idx_brand_settings_org ON brand_settings(org_id)');
+    // Use only the columns that exist on the legacy table — handlers added
+    // various optional columns (whatsapp, *_handle, business_*, country,
+    // founding_date, overlay_contact_enabled) in different orders, so the
+    // shared-set approach is the only one that doesn't break a half-
+    // upgraded database.
+    const legacyCols = db.exec('PRAGMA table_info(brand_settings_legacy)')[0]
+      .values.map((r) => r[1]);
+    const newCols = db.exec('PRAGMA table_info(brand_settings)')[0]
+      .values.map((r) => r[1]);
+    const shared = legacyCols.filter((c) => newCols.includes(c) && c !== 'id');
+    const colList = shared.join(', ');
+    db.run(`
+      INSERT INTO brand_settings (id, ${colList})
+      SELECT lower(hex(randomblob(16))) AS id, ${colList}
+        FROM brand_settings_legacy
+    `);
+    db.run('DROP TABLE brand_settings_legacy');
+  }
   // Idempotent migration: add columns that may be missing on older DBs
   const existingCols = new Set(
     db.exec("PRAGMA table_info(brand_settings)")[0]?.values.map(r => r[1]) || []
@@ -184,12 +240,39 @@ async function init() {
     // Overlay toggles — let the user opt out of the auto-stamped contact
     // strip on rendered images / videos. Default 1 (on).
     ['overlay_contact_enabled', 'INTEGER NOT NULL DEFAULT 1'],
+    // Multi-brand support — an org can carry multiple brand profiles
+    // (e.g. Hitratech IT consultancy + Hitrapost SaaS in the same
+    // workspace). brand_settings rows are no longer 1:1 with orgs;
+    // each row is one brand and `is_default` flags which one fills
+    // the auto-context when a post / plan item doesn't specify one.
+    // `name` is the human label shown in the brand switcher.
+    ['name',       'TEXT'],
+    ['is_default', "INTEGER NOT NULL DEFAULT 0"],
   ];
   for (const [name, type] of wantedCols) {
     if (!existingCols.has(name)) {
       db.run(`ALTER TABLE brand_settings ADD COLUMN ${name} ${type}`);
     }
   }
+
+  // Multi-brand backfill: every org needs at least one brand row flagged
+  // as default. We seed name='Default' for any nameless rows and promote
+  // the first row of each org to is_default=1 so the existing pre-multi
+  // workspaces keep working without an extra UI step.
+  db.run("UPDATE brand_settings SET name = COALESCE(name, business_name, 'Default') WHERE name IS NULL OR name = ''");
+  // Promote one brand per org to default — pick the lowest-id row so the
+  // assignment is deterministic across reboots. We only fix orgs that
+  // don't already have a default flagged, so re-running the migration
+  // is a no-op on already-migrated databases.
+  db.run(`
+    UPDATE brand_settings
+       SET is_default = 1
+     WHERE id IN (
+       SELECT MIN(id) FROM brand_settings
+        GROUP BY org_id
+        HAVING SUM(is_default) = 0
+     )
+  `);
 
   // ---- content ----------------------------------------------------------
   db.run(`
@@ -220,6 +303,12 @@ async function init() {
   const wantedPostCols = [
     ['quality_score',  'INTEGER'],
     ['quality_report', 'TEXT'],    // JSON blob: { breakdown, issues, suggestions, verdict, refined, ... }
+    // Multi-brand: which brand profile this post should be measured /
+    // captioned / overlaid against. NULL means "use the org's default
+    // brand at evaluation time" — keeps legacy posts working without
+    // a backfill, and the posts.routes generator now stamps brand_id
+    // explicitly when one is selected on the form.
+    ['brand_id',       'TEXT'],
   ];
   for (const [name, type] of wantedPostCols) {
     if (!existingPostCols.has(name)) {
@@ -324,11 +413,24 @@ async function init() {
   db.run(`CREATE INDEX IF NOT EXISTS idx_plan_items_schedule     ON content_plan_items(scheduled_for)`);
 
   // Idempotent: add 'attempts' column for auto-retry on failed items
+  // and 'brand_id' so calendar plan items can target a specific brand
+  // profile when a workspace has more than one. NULL = default brand.
   const planItemCols = new Set(
     db.exec("PRAGMA table_info(content_plan_items)")[0]?.values.map(r => r[1]) || []
   );
   if (!planItemCols.has('attempts')) {
     db.run(`ALTER TABLE content_plan_items ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0`);
+  }
+  if (!planItemCols.has('brand_id')) {
+    db.run(`ALTER TABLE content_plan_items ADD COLUMN brand_id TEXT`);
+  }
+  // content_plans (the parent record) also gets a default brand so a
+  // newly-created plan stamps every item it spawns with the same brand.
+  const planCols = new Set(
+    db.exec("PRAGMA table_info(content_plans)")[0]?.values.map(r => r[1]) || []
+  );
+  if (!planCols.has('brand_id')) {
+    db.run(`ALTER TABLE content_plans ADD COLUMN brand_id TEXT`);
   }
 
   // Business-specific important dates (company anniversary, launches, etc).

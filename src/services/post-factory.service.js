@@ -33,12 +33,18 @@ async function generateAndSavePost({
   onBrand = true, variants = 1, qualityGate = true,
   initialStatus = 'draft',
   existingId = null, // when set, UPDATE that row instead of INSERTing new
+  brandId = null,    // multi-brand: target a specific brand profile; null → default
 }) {
   if (!orgId) throw new Error('orgId required');
   if (!prompt) throw new Error('prompt required');
 
-  // 1. Business context for orchestrator + overlay
-  const brand = prepare('SELECT * FROM brand_settings WHERE org_id = ?').get(orgId);
+  // 1. Resolve the brand profile this post is created against. Explicit
+  // brand_id wins (multi-brand UI selection); else fall back to the
+  // org's default brand. Pre-multi databases land here with exactly one
+  // row flagged is_default=1 by the database.js migration.
+  const brand = brandId
+    ? prepare('SELECT * FROM brand_settings WHERE id = ? AND org_id = ?').get(brandId, orgId)
+    : prepare('SELECT * FROM brand_settings WHERE org_id = ? AND is_default = 1').get(orgId);
 
   // 2. Multi-model orchestrated content
   const { content, quality } = await orchestrateContent(prompt, platforms, {
@@ -62,20 +68,22 @@ async function generateAndSavePost({
     prepare(`
       UPDATE posts
          SET caption = ?, hashtags = ?, image_url = ?, drive_url = ?, drive_file_id = ?,
-             status = ?, quality_score = ?, quality_report = ?, updated_at = datetime('now')
+             status = ?, quality_score = ?, quality_report = ?,
+             brand_id = COALESCE(?, brand_id), updated_at = datetime('now')
        WHERE id = ? AND org_id = ?
     `).run(
       content.caption, hashtags, image.url, cloudResult.publicUrl, cloudResult.fileId,
       initialStatus,
       quality ? quality.score : null,
       quality ? JSON.stringify(quality) : null,
+      brand ? brand.id : null,
       id, orgId,
     );
   } else {
     prepare(`
       INSERT INTO posts
-        (id, org_id, user_id, prompt, caption, hashtags, image_url, drive_url, drive_file_id, platforms, status, quality_score, quality_report)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, org_id, user_id, prompt, caption, hashtags, image_url, drive_url, drive_file_id, platforms, status, quality_score, quality_report, brand_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, orgId, userId, prompt, content.caption, hashtags,
       image.url, cloudResult.publicUrl, cloudResult.fileId,
@@ -83,6 +91,7 @@ async function generateAndSavePost({
       initialStatus,
       quality ? quality.score : null,
       quality ? JSON.stringify(quality) : null,
+      brand ? brand.id : null,
     );
   }
 

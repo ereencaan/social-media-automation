@@ -37,14 +37,45 @@ const UPDATABLE_FIELDS = [
   'country', 'founding_date',
 ];
 
-function ensureRow(orgId) {
-  const row = prepare('SELECT * FROM brand_settings WHERE org_id = ?').get(orgId);
-  if (!row) prepare('INSERT INTO brand_settings (org_id) VALUES (?)').run(orgId);
+// Multi-brand layer: an org can carry N brand_settings rows, exactly one
+// of them flagged is_default=1. Pre-multi data is migrated by
+// database.js init: every existing row gets is_default=1 and a
+// 'Default' name. From here on, callers that want "the brand"
+// (no specific id) get the default; callers with a brand_id pull
+// that specific row.
+
+function ensureDefaultBrand(orgId) {
+  const row = prepare('SELECT id FROM brand_settings WHERE org_id = ? AND is_default = 1').get(orgId);
+  if (row) return row.id;
+  // Brand-new org with no row yet — seed a default.
+  const id = generateId();
+  prepare(`
+    INSERT INTO brand_settings (id, org_id, name, is_default)
+    VALUES (?, ?, 'Default', 1)
+  `).run(id, orgId);
+  return id;
 }
 
+function listBrands(orgId) {
+  return prepare(
+    'SELECT * FROM brand_settings WHERE org_id = ? ORDER BY is_default DESC, name COLLATE NOCASE'
+  ).all(orgId);
+}
+
+function getBrand(orgId, brandId) {
+  return prepare('SELECT * FROM brand_settings WHERE id = ? AND org_id = ?').get(brandId, orgId);
+}
+
+function getDefaultBrand(orgId) {
+  ensureDefaultBrand(orgId);
+  return prepare('SELECT * FROM brand_settings WHERE org_id = ? AND is_default = 1').get(orgId);
+}
+
+// Legacy helper kept for the older logo / autofill / etc. handlers below
+// that still operate on "the org's brand". They now route to the default
+// brand transparently.
 function getSettings(orgId) {
-  ensureRow(orgId);
-  return prepare('SELECT * FROM brand_settings WHERE org_id = ?').get(orgId);
+  return getDefaultBrand(orgId);
 }
 
 function cloudinaryConfigured() {
@@ -76,21 +107,77 @@ function deleteLocalLogoIfAny(fileId) {
   try { fs.unlinkSync(abs); } catch { /* already gone */ }
 }
 
-// ---- GET /api/brand ------------------------------------------------------
+// ---- GET /api/brand --------------------------------------------------------
+// Legacy contract: returned the single brand row. New contract: returns
+// the org's *default* brand (so existing callers like the post pipeline
+// see a single row in the same shape). Use /api/brand/list for the full
+// multi-brand listing the new UI consumes.
 router.get('/', (req, res) => {
   res.json(getSettings(req.user.orgId));
 });
 
-// ---- PUT /api/brand ------------------------------------------------------
-router.put('/', (req, res) => {
-  ensureRow(req.user.orgId);
+// ---- GET /api/brand/list ---------------------------------------------------
+// Multi-brand listing. Each row carries is_default flag so the UI can
+// render the active-brand badge without an extra query.
+router.get('/list', (req, res) => {
+  ensureDefaultBrand(req.user.orgId);
+  res.json(listBrands(req.user.orgId));
+});
+
+// ---- POST /api/brand -------------------------------------------------------
+// Create a new brand for this org. Body: { name } (required). The newly
+// created row is returned with is_default=0; the caller can flip it via
+// PUT /api/brand/:id with { is_default: true } to make it the default.
+router.post('/', (req, res) => {
+  const name = (req.body && req.body.name ? String(req.body.name) : '').trim();
+  if (!name) return res.status(400).json({ error: 'Brand name is required' });
+  if (name.length > 80) return res.status(400).json({ error: 'Brand name too long (max 80 chars)' });
+
+  // Make sure the org has a default before adding a new brand — protects
+  // the invariant that every org always has exactly one default.
+  ensureDefaultBrand(req.user.orgId);
+
+  const id = generateId();
+  prepare(`
+    INSERT INTO brand_settings (id, org_id, name, is_default)
+    VALUES (?, ?, ?, 0)
+  `).run(id, req.user.orgId, name);
+  res.status(201).json(getBrand(req.user.orgId, id));
+});
+
+// ---- GET /api/brand/:id ----------------------------------------------------
+router.get('/:id', (req, res) => {
+  // The handful of static sub-routes above (/list, /logo, /holidays, …) are
+  // declared first; once they're matched Express won't fall into here.
+  const row = getBrand(req.user.orgId, req.params.id);
+  if (!row) return res.status(404).json({ error: 'Brand not found' });
+  res.json(row);
+});
+
+// ---- PUT /api/brand[/:id] --------------------------------------------------
+// Update one brand. The legacy contract (PUT /api/brand without an id)
+// updates the default brand for backward compatibility with any older
+// SPA cache the user might have. The new path (PUT /api/brand/:id) lets
+// the multi-brand UI target a specific row. Both share the same handler.
+function brandUpdateHandler(req, res) {
+  const orgId = req.user.orgId;
+  const targetId = req.params.id || (getDefaultBrand(orgId) && getDefaultBrand(orgId).id);
+  if (!targetId) return res.status(404).json({ error: 'Brand not found' });
+  const existing = getBrand(orgId, targetId);
+  if (!existing) return res.status(404).json({ error: 'Brand not found' });
 
   const updates = [];
   const values = [];
+  // 'name' is multi-brand specific — UPDATABLE_FIELDS doesn't carry it.
+  if ('name' in req.body) {
+    const n = String(req.body.name || '').trim();
+    if (!n) return res.status(400).json({ error: 'Brand name cannot be empty' });
+    updates.push('name = ?');
+    values.push(n.slice(0, 80));
+  }
   for (const field of UPDATABLE_FIELDS) {
     if (field in req.body) {
       updates.push(`${field} = ?`);
-      // Booleans (toggles) are stored as 0/1 ints, not strings.
       if (field === 'overlay_contact_enabled') {
         const v = req.body[field];
         values.push((v === true || v === 1 || v === '1' || v === 'on') ? 1 : 0);
@@ -99,21 +186,53 @@ router.put('/', (req, res) => {
       }
     }
   }
-  if (!updates.length) return res.status(400).json({ error: 'No fields to update' });
 
-  updates.push("updated_at = datetime('now')");
-  values.push(req.user.orgId);
-
-  prepare(`UPDATE brand_settings SET ${updates.join(', ')} WHERE org_id = ?`).run(...values);
-
-  // Side effect: when founding_date is set or changed, ensure a
-  // "Company anniversary" entry exists in brand_special_dates so the
-  // planner picks it up every year automatically.
-  if ('founding_date' in req.body) {
-    upsertFoundingAnniversary(req.user.orgId, req.body.founding_date);
+  // is_default flip: setting one brand as default automatically demotes
+  // the previous default. We do it in a single transaction-shape so the
+  // invariant (exactly one default per org) holds even mid-update.
+  if ('is_default' in req.body) {
+    const wantDefault = req.body.is_default === true || req.body.is_default === 1 || req.body.is_default === '1';
+    if (wantDefault) {
+      prepare("UPDATE brand_settings SET is_default = 0 WHERE org_id = ?").run(orgId);
+      updates.push('is_default = 1');
+    }
+    // We never let an explicit { is_default: false } clear the flag —
+    // there must always be a default. Caller picks a different brand
+    // and flips THAT to default; this row is demoted automatically.
   }
 
-  res.json(getSettings(req.user.orgId));
+  if (!updates.length) return res.status(400).json({ error: 'No fields to update' });
+  updates.push("updated_at = datetime('now')");
+  values.push(targetId, orgId);
+
+  prepare(`UPDATE brand_settings SET ${updates.join(', ')} WHERE id = ? AND org_id = ?`).run(...values);
+
+  // Side effect: founding_date change re-seeds the auto anniversary entry.
+  // Scope it to this brand by passing brand_id in (note in DB is per-org
+  // today; future cleanup is to make __auto_founding_anniversary__ rows
+  // scoped to a brand_id too).
+  if ('founding_date' in req.body) {
+    upsertFoundingAnniversary(orgId, req.body.founding_date);
+  }
+
+  res.json(getBrand(orgId, targetId));
+}
+router.put('/', brandUpdateHandler);
+router.put('/:id', brandUpdateHandler);
+
+// ---- DELETE /api/brand/:id -------------------------------------------------
+// Block deletion of the default brand — the UI must promote a different
+// brand first. Leaves posts that reference the deleted brand in place
+// (brand_id is nullable; orchestrator falls back to the org default at
+// re-evaluation time).
+router.delete('/:id', (req, res) => {
+  const row = getBrand(req.user.orgId, req.params.id);
+  if (!row) return res.status(404).json({ error: 'Brand not found' });
+  if (row.is_default) {
+    return res.status(409).json({ error: 'Cannot delete the default brand. Promote another brand first.' });
+  }
+  prepare('DELETE FROM brand_settings WHERE id = ? AND org_id = ?').run(req.params.id, req.user.orgId);
+  res.json({ ok: true });
 });
 
 function upsertFoundingAnniversary(orgId, foundingDateRaw) {
@@ -136,21 +255,36 @@ function upsertFoundingAnniversary(orgId, foundingDateRaw) {
 }
 
 // ---- POST /api/brand/logo -----------------------------------------------
+// Resolve the brand a logo / autofill / delete handler should operate on:
+// explicit ?brand_id=... query param wins, else fall back to the org's
+// default brand. Keeps legacy callers working without parameter while the
+// new multi-brand UI passes a specific id when editing a non-default brand.
+function resolveTargetBrand(req) {
+  const orgId = req.user.orgId;
+  const explicit = req.query && req.query.brand_id;
+  if (explicit) {
+    const row = getBrand(orgId, String(explicit));
+    if (!row) return null;
+    return row;
+  }
+  return getDefaultBrand(orgId);
+}
+
 router.post('/logo', (req, res) => {
   upload.single('logo')(req, res, async (mErr) => {
     if (mErr) return res.status(400).json({ error: mErr.message });
     try {
       if (!req.file) return res.status(400).json({ error: 'No logo file provided' });
-      ensureRow(req.user.orgId);
+      const target = resolveTargetBrand(req);
+      if (!target) return res.status(404).json({ error: 'Brand not found' });
 
       // Delete any existing local logo before overwriting
-      const prev = prepare('SELECT logo_cloudinary_id FROM brand_settings WHERE org_id = ?').get(req.user.orgId);
-      if (prev && prev.logo_cloudinary_id) deleteLocalLogoIfAny(prev.logo_cloudinary_id);
+      if (target.logo_cloudinary_id) deleteLocalLogoIfAny(target.logo_cloudinary_id);
 
       let result;
       if (cloudinaryConfigured()) {
         const { uploadImage } = require('../services/cloudinary.service');
-        result = await uploadImage(req.file.buffer, `brand_logo_${req.user.orgId}`);
+        result = await uploadImage(req.file.buffer, `brand_logo_${target.id}`);
       } else {
         result = saveLogoLocally(req.user.orgId, req.file.buffer, req.file.mimetype);
       }
@@ -158,10 +292,10 @@ router.post('/logo', (req, res) => {
       prepare(`
         UPDATE brand_settings
         SET logo_url = ?, logo_cloudinary_id = ?, updated_at = datetime('now')
-        WHERE org_id = ?
-      `).run(result.publicUrl, result.fileId, req.user.orgId);
+        WHERE id = ? AND org_id = ?
+      `).run(result.publicUrl, result.fileId, target.id, req.user.orgId);
 
-      res.json(getSettings(req.user.orgId));
+      res.json(getBrand(req.user.orgId, target.id));
     } catch (err) {
       console.error('[BrandLogo]', err);
       res.status(500).json({ error: err.message });
@@ -172,15 +306,12 @@ router.post('/logo', (req, res) => {
 // ---- POST /api/brand/autofill-from-website ------------------------------
 // Fetches the given website (or the saved brand.website) and asks Claude
 // to extract a business profile. Returns the suggested profile WITHOUT
-// saving it; the client previews and confirms before PUT /api/brand.
+// saving it; the client previews and confirms before PUT /api/brand[/:id].
 router.post('/autofill-from-website', async (req, res) => {
   try {
-    ensureRow(req.user.orgId);
-    let url = (req.body && req.body.url) || '';
-    if (!url) {
-      const row = prepare('SELECT website FROM brand_settings WHERE org_id = ?').get(req.user.orgId);
-      url = row && row.website;
-    }
+    const target = resolveTargetBrand(req);
+    if (!target) return res.status(404).json({ error: 'Brand not found' });
+    const url = (req.body && req.body.url) || target.website;
     if (!url) return res.status(400).json({ error: 'No website URL provided' });
 
     const { analyzeWebsite } = require('../services/website-analyzer.service');
@@ -194,15 +325,15 @@ router.post('/autofill-from-website', async (req, res) => {
 
 // ---- DELETE /api/brand/logo ---------------------------------------------
 router.delete('/logo', (req, res) => {
-  ensureRow(req.user.orgId);
-  const cur = prepare('SELECT logo_cloudinary_id FROM brand_settings WHERE org_id = ?').get(req.user.orgId);
-  if (cur && cur.logo_cloudinary_id) deleteLocalLogoIfAny(cur.logo_cloudinary_id);
+  const target = resolveTargetBrand(req);
+  if (!target) return res.status(404).json({ error: 'Brand not found' });
+  if (target.logo_cloudinary_id) deleteLocalLogoIfAny(target.logo_cloudinary_id);
   prepare(`
     UPDATE brand_settings
     SET logo_url = NULL, logo_cloudinary_id = NULL, updated_at = datetime('now')
-    WHERE org_id = ?
-  `).run(req.user.orgId);
-  res.json(getSettings(req.user.orgId));
+    WHERE id = ? AND org_id = ?
+  `).run(target.id, req.user.orgId);
+  res.json(getBrand(req.user.orgId, target.id));
 });
 
 // ---- GET /api/brand/holidays?country=GB&year=2026 ------------------------
