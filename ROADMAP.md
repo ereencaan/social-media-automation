@@ -185,14 +185,14 @@
 - [x] CF7 / WPForms / Elementor / Gravity / Ninja body-parser — `parseFormBody()` extracts labelled `Name: / First Name+Last Name / Email: / Phone:` fields from the message body. Also handles `Visitor:` (Tidio) and `Sender:` (Tawk) chat-notification patterns. For service-notification sources (`wordpress_form` / `tidio_livechat` / `tawk` / `crisp` / `smartsupp` / `livechat`) body wins over the From header so the lead lands as the real customer ("Mike Brown") instead of the bot ("WordPress" / "Tidio"). Empty bodies still fall back to header so we never silently drop an inbound contact.
 
 ### Meta App Review (UNBLOCKS real IG/FB DM ingest)
-- [!] App icon 1024×1024
-- [!] Privacy Policy URL (host on hitrapost.co.uk/privacy)
-- [!] Terms of Service URL (host on hitrapost.co.uk/terms)
-- [!] App walkthrough video (screencast)
-- [!] Business Verification (Companies House cert, UK Ltd.)
-- [!] Submit `instagram_manage_messages` permission
-- [!] Submit `pages_messaging` permission
-- [!] App Mode → Live (after approval)
+- [x] App icon 1024×1024 — `public/logo-icon-1024.png` (upscaled from 512 via sharp lanczos3)
+- [x] Privacy Policy URL (live: hitrapost.co.uk/privacy)
+- [x] Terms of Service URL (live: hitrapost.co.uk/terms)
+- [x] **Submission package written** — `docs/META_APP_REVIEW.md` has every form field's copy-paste text, scope justifications, walkthrough video script, test-user instructions, post-submission troubleshooting
+- [ ] App walkthrough video (screencast — script in submission doc, user records)
+- [ ] Business Verification (upload Companies House cert in dashboard)
+- [ ] Submit `instagram_manage_messages` + `pages_messaging` permissions (form pre-filled per doc)
+- [ ] App Mode → Live (after approval)
 
 ---
 
@@ -218,7 +218,7 @@
 - [x] (Phase 2) `TIKTOK_CLIENT_KEY` + `TIKTOK_CLIENT_SECRET` documented in .env.example, set on prod
 - [x] (Phase 2.5) Content Posting API publish — `tiktok.service.js` push_by_file Inbox mode shipped (init + single-chunk PUT + status fetch); 287 MB cap; manual "🎵 Push to TikTok" button on post preview
 - [x] (Phase 2.5d) `tiktok` registered in `scheduler.platformPosters` so the cron-driven publish path fans out to TikTok alongside IG/FB/LI
-- [ ] (Phase 2 audit) Direct Post (`video.publish` scope) — needs production audit + demo video
+- [~] (Phase 2 audit) Direct Post (`video.publish` scope) — submission package written in `docs/TIKTOK_PRODUCTION_AUDIT.md`; user records demo video + uploads Companies House cert + submits
 - [x] Async video status callback handling — new `platform_publish_jobs` table tracks each TikTok upload. scheduler cron polls every 30s with progressive backoff (30s → 600s, cap 60 attempts ~= 6h). Terminal outcomes (SUCCESS / FAILED / EXPIRED) write into `post_logs` so the UI's status chip reflects reality. `GET /api/posts/:id` also returns `publishJobs[]` so the UI can show "Still processing on TikTok…" while the upload is mid-flight.
 
 **YouTube Shorts — Phase 1 shipped; Phase 2 needs Google Cloud project**
@@ -233,7 +233,7 @@
 - [x] (Phase 2.5) Resumable video upload via `/upload/youtube/v3/videos` with Shorts metadata (`#Shorts` always appended to description, title clipped to 100 chars, tags pulled from hashtag tokens) — `youtube.service.js`. Auto-refresh of expired access tokens with `needs_reauth` fallback when refresh fails. Default privacyStatus = `private` for the manual button, `public` for the cron-driven scheduler path. Manual "▶ Upload to YouTube" button opens the new Short in a new tab on success.
 - [x] (Phase 2.5d) `youtube_shorts` registered in `scheduler.platformPosters` — cron schedule publishes to YouTube alongside IG/FB/LI/TikTok
 - [x] (Phase 2.5c) Image/video render pipeline → 9:16 vertical: `flux.service.SIZES.tiktok / .youtube_shorts` = 1080×1920, `runway.service.RATIOS.tiktok / .youtube_shorts` = 720:1280
-- [ ] (Phase 2 audit) Production OAuth verification — Testing mode caps at 100 users; verification needs demo video + privacy/terms (already live) + scope justification
+- [~] (Phase 2 audit) Production OAuth verification — submission package written in `docs/GOOGLE_OAUTH_VERIFICATION.md`; user verifies domain in Search Console + records demo video (Unlisted on YouTube) + submits brand verification (~1 day) + sensitive scopes review (2-6 weeks)
 - [ ] (Phase 2 production) Quota increase request from Google (default 10K units/day = ~6 uploads/day across all customers; need increase for real volume)
 - [ ] Per-platform render pass — currently we render once for the first platform; multi-platform posts (IG square + TikTok vertical on the same post) need two renders or a single 9:16 master with smart-crop fallback for square slots
 
