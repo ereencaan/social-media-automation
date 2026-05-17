@@ -352,6 +352,36 @@ async function init() {
   `);
   db.run(`CREATE INDEX IF NOT EXISTS idx_post_logs_post ON post_logs(post_id)`);
 
+  // Async upload tracking for platforms that process media off the
+  // request path (TikTok ingests asynchronously: PROCESSING_DOWNLOAD →
+  // PROCESSING_UPLOAD → SUCCESS / FAILED, can take minutes). We record
+  // one job per upload, poll the platform on a backoff schedule from
+  // scheduler.service, and write the terminal outcome into post_logs.
+  //
+  // Stop-conditions: terminal_at set (SUCCEEDED / FAILED / EXPIRED) OR
+  // attempts >= 60 (~6h with progressive backoff). The poller skips
+  // anything with terminal_at non-null so finished jobs never re-poll.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS platform_publish_jobs (
+      id                  TEXT PRIMARY KEY,
+      org_id              TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+      post_id             TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      platform            TEXT NOT NULL,
+      external_id         TEXT NOT NULL,
+      status              TEXT NOT NULL DEFAULT 'PENDING',
+      attempts            INTEGER NOT NULL DEFAULT 0,
+      last_status_payload TEXT,
+      last_polled_at      TEXT,
+      next_poll_at        TEXT,
+      terminal_at         TEXT,
+      error               TEXT,
+      created_at          TEXT DEFAULT (datetime('now')),
+      updated_at          TEXT DEFAULT (datetime('now'))
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_pub_jobs_due  ON platform_publish_jobs(terminal_at, next_poll_at)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_pub_jobs_post ON platform_publish_jobs(post_id)`);
+
   // ---- CRM / leads ------------------------------------------------------
   db.run(`
     CREATE TABLE IF NOT EXISTS leads (

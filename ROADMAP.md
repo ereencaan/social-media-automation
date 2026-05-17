@@ -219,7 +219,7 @@
 - [x] (Phase 2.5) Content Posting API publish — `tiktok.service.js` push_by_file Inbox mode shipped (init + single-chunk PUT + status fetch); 287 MB cap; manual "🎵 Push to TikTok" button on post preview
 - [x] (Phase 2.5d) `tiktok` registered in `scheduler.platformPosters` so the cron-driven publish path fans out to TikTok alongside IG/FB/LI
 - [ ] (Phase 2 audit) Direct Post (`video.publish` scope) — needs production audit + demo video
-- [ ] (Phase 2) Async video status callback handling (TikTok processes uploads asynchronously; current `fetchStatus` is fire-on-init only)
+- [x] Async video status callback handling — new `platform_publish_jobs` table tracks each TikTok upload. scheduler cron polls every 30s with progressive backoff (30s → 600s, cap 60 attempts ~= 6h). Terminal outcomes (SUCCESS / FAILED / EXPIRED) write into `post_logs` so the UI's status chip reflects reality. `GET /api/posts/:id` also returns `publishJobs[]` so the UI can show "Still processing on TikTok…" while the upload is mid-flight.
 
 **YouTube Shorts — Phase 1 shipped; Phase 2 needs Google Cloud project**
 - [x] `youtube_shorts` chip on the posts multi-platform selector + calendar plans

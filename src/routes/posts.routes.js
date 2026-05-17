@@ -18,6 +18,7 @@ const { applyImageOverlay, applyVideoOverlay } = require('../services/overlay.se
 const { schedulePost, cancelSchedule, publishPost } = require('../services/scheduler.service');
 const { postToTikTok, fetchStatus: fetchTikTokStatus } = require('../services/tiktok.service');
 const { postToYouTube } = require('../services/youtube.service');
+const publishJobs = require('../services/platform-publish-jobs.service');
 const { enforceQuota, requirePlan } = require('../middleware/billing');
 const { requireVerifiedEmail } = require('../middleware/email-verified');
 const usage = require('../services/usage.service');
@@ -438,13 +439,21 @@ router.get('/', (req, res) => {
   res.json(posts.map(presentPost));
 });
 
-// Get single post with logs
+// Get single post with logs + any in-flight async publish jobs (TikTok
+// upload status etc.) so the UI can show "Still processing on TikTok…"
+// instead of leaving the user wondering whether their post made it.
 router.get('/:id', (req, res) => {
   const post = getOwnedPost(req.params.id, req.user.orgId);
   if (!post) return res.status(404).json({ error: 'Post not found' });
 
   const logs = prepare('SELECT * FROM post_logs WHERE post_id = ? ORDER BY posted_at DESC').all(req.params.id);
-  res.json({ ...presentPost(post), logs });
+  const publishJobs = prepare(`
+    SELECT platform, status, attempts, last_polled_at, terminal_at, error, created_at
+      FROM platform_publish_jobs
+     WHERE post_id = ?
+     ORDER BY created_at DESC
+  `).all(req.params.id);
+  res.json({ ...presentPost(post), logs, publishJobs });
 });
 
 // Update post (caption, hashtags, platforms)
@@ -522,6 +531,23 @@ router.post('/:id/publish/tiktok', async (req, res) => {
       const cred = require('../services/social-credentials.service').getActive(req.user.orgId, 'tiktok');
       if (cred) status = await fetchTikTokStatus(cred.access_token, result.publishId);
     } catch (_) { /* non-fatal */ }
+
+    // Register a publish-job so the scheduler's poller chases the
+    // PROCESSING_DOWNLOAD → SUCCESS / FAILED transitions. Without this,
+    // a manual TikTok publish would never surface a terminal status —
+    // the upload could fail server-side and the user would never know.
+    if (result?.publishId) {
+      try {
+        publishJobs.createJob({
+          orgId: req.user.orgId,
+          postId: post.id,
+          platform: 'tiktok',
+          externalId: result.publishId,
+          initialStatus: status?.status || 'PROCESSING_DOWNLOAD',
+        });
+      } catch (e) { console.warn('[posts/publish/tiktok] publish-job create failed:', e.message); }
+    }
+
     res.json({ ...result, status });
   } catch (err) {
     console.error('[posts/publish/tiktok]', err);

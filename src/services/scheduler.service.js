@@ -1,4 +1,5 @@
 const cron = require('node-cron');
+const crypto = require('crypto');
 const { prepare } = require('../config/database');
 const { postToInstagram } = require('./instagram.service');
 const { postToFacebook } = require('./facebook.service');
@@ -7,6 +8,9 @@ const { postToTikTok } = require('./tiktok.service');
 const { postToYouTube } = require('./youtube.service');
 const { generateAndSavePost } = require('./post-factory.service');
 const { getMediaUrlFor } = require('../utils/platform-aspect');
+const publishJobs = require('./platform-publish-jobs.service');
+const { fetchStatus: fetchTikTokStatus } = require('./tiktok.service');
+const credsService = require('./social-credentials.service');
 
 // ---- Plan item automation windows ---------------------------------------
 // Start generating a plan item's media this many hours before its scheduled
@@ -44,8 +48,23 @@ const platformPosters = {
   // helper returns the vertical variant. Captions on TikTok Inbox mode
   // aren't accepted (creator types those in the app); YouTube uses the
   // post's caption + hashtags via buildSnippet.
-  tiktok: (post) => {
-    return postToTikTok(getMediaUrlFor(post, 'tiktok'), { orgId: post.org_id });
+  tiktok: async (post) => {
+    const result = await postToTikTok(getMediaUrlFor(post, 'tiktok'), { orgId: post.org_id });
+    // Register an async-status job so the cron poller chases TikTok's
+    // PROCESSING_DOWNLOAD → SUCCESS / FAILED transitions and surfaces
+    // the terminal outcome to the UI via post_logs.
+    if (result?.publishId) {
+      try {
+        publishJobs.createJob({
+          orgId: post.org_id,
+          postId: post.id,
+          platform: 'tiktok',
+          externalId: result.publishId,
+          initialStatus: 'PROCESSING_DOWNLOAD',
+        });
+      } catch (e) { console.warn('[Scheduler] publish-job create failed:', e.message); }
+    }
+    return result;
   },
   youtube_shorts: (post) => {
     return postToYouTube(post, getMediaUrlFor(post, 'youtube_shorts'), {
@@ -320,6 +339,29 @@ cron.schedule('* * * * *', () => {
 cron.schedule('*/10 * * * *', () => runPlanGenerationWorker().catch(err => console.error('[PlanWorker]', err)));
 //   every minute  — publish items whose approved-state + scheduled_for has arrived
 cron.schedule('* * * * *',    () => runPlanPublishWorker().catch(err => console.error('[PlanPublisher]', err)));
+
+// Async publish-status poller. TikTok ingests uploads asynchronously
+// (PROCESSING_DOWNLOAD → PROCESSING_UPLOAD → SUCCESS / FAILED) so the
+// fire-and-forget status fetch we do at upload time only catches the
+// initial state. Without this poller, a publish that fails after the
+// HTTP response (unsupported codec, content moderation) would never
+// surface in the UI. Ticks every 30s — backoff schedule lives in the
+// publish-jobs service.
+cron.schedule('*/30 * * * * *', () =>
+  publishJobs.runPollerTick({
+    fetchStatus: fetchTikTokStatus,
+    resolveAccessToken: (orgId) => {
+      const row = credsService.getActive(orgId, 'tiktok');
+      return row?.access_token || null;
+    },
+    recordPostLog: (postId, platform, status, response, externalId = null) => {
+      const message = response?.message || response?.fail_reason || null;
+      prepare(
+        'INSERT INTO post_logs (id, post_id, platform, status, message, external_id) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(crypto.randomBytes(8).toString('hex'), postId, platform, status, message, externalId);
+    },
+  }).catch((err) => console.error('[PublishJobsPoller]', err))
+);
 
 // Kick a generation cycle ~5s after boot so a just-past-window item doesn't
 // wait up to 10 minutes for its first chance.
