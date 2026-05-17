@@ -35,12 +35,14 @@
 - [x] Pre-commit hook: advisory mode (false-positive proof)
 - [x] Oracle VM deploy + nginx + Let's Encrypt + Cloudflare DNS
 
-### P0 smoke test (in flight)
-- [~] End-to-end: Brand → Generate → Schedule → Publish to IG/FB/LinkedIn
-- [ ] Lead CRM: manual lead → AI email draft → save activity
-- [ ] Calendar: build month plan → 48h auto-gen → review
-- [ ] Webhook intake: curl test → lead lands with `webhook` chip
-- [ ] Schedule + publish smoke: scheduled post fires on time
+### P0 smoke test
+- [x] Automated harness — `scripts/smoke.js` covers Lead CRM, content plan, scheduler loader, email service wiring, and webhook-intake token resolution. Run after every deploy: `node scripts/smoke.js`. 5/5 passing on prod.
+- [x] Webhook intake: curl test → lead lands with `webhook` chip (verified via live POST + DB readback)
+- [x] Lead CRM: create lead + activity + read + delete (smoke harness)
+- [x] Content plan: insert plan + item + read + delete (smoke harness)
+- [~] End-to-end IG/FB/LinkedIn publish — manual UI verify needed (smoke skips real-platform posting on purpose so it doesn't spam customer accounts)
+- [ ] AI lead-email draft — manual UI verify (Leads → drawer → "Draft email"); skipped from harness to avoid Claude/Gemini cost on every run
+- [ ] 48h auto-gen of plan items — runs on cron; verify after first month rollover with `SELECT * FROM content_plan_items WHERE status='generated' ORDER BY updated_at DESC LIMIT 5`
 
 ### P0.5 — Don't lose data
 - [x] Nightly backup: `posts.db` → Cloudflare R2 / B2 (cron, 30-day retention)

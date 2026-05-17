@@ -11,6 +11,7 @@ const { generateImage } = require('./flux.service');
 const { applyImageOverlay } = require('./overlay.service');
 const { uploadImage } = require('./cloudinary.service');
 const { orchestrateContent } = require('./orchestrator.service');
+const { distinctAspects, repPlatformFor, aspectOf } = require('../utils/platform-aspect');
 
 /**
  * Build and persist a post from a prompt.
@@ -51,13 +52,35 @@ async function generateAndSavePost({
     business: brand, onBrand, variants, qualityGate,
   });
 
-  // 3. Image (Flux) + brand overlay + Cloudinary
+  // 3. Image (Flux) + brand overlay + Cloudinary — one render per distinct
+  // aspect group across the requested platforms. Single-aspect posts (the
+  // common case) still produce exactly one Flux call. Multi-aspect posts
+  // fan out to 2–3 parallel renders so IG square + TikTok vertical get
+  // properly proportioned images instead of one squished into both.
   const imagePrompt = content.imagePrompt || prompt;
-  const image = await generateImage(imagePrompt, platforms[0]);
-  const imageBuffer = await downloadImage(image.url);
-  const finalBuffer = brand ? await applyImageOverlay(imageBuffer, brand) : imageBuffer;
-  const fileName = `post_${Date.now()}.jpg`;
-  const cloudResult = await uploadImage(finalBuffer, fileName);
+  const aspects = distinctAspects(platforms);
+
+  const renders = await Promise.all(aspects.map(async (asp) => {
+    const repPlatform = repPlatformFor(asp);
+    const image = await generateImage(imagePrompt, repPlatform);
+    const imageBuffer = await downloadImage(image.url);
+    const finalBuffer = brand ? await applyImageOverlay(imageBuffer, brand) : imageBuffer;
+    const fileName = `post_${Date.now()}_${asp}.jpg`;
+    const cloudResult = await uploadImage(finalBuffer, fileName);
+    return { aspect: asp, rawUrl: image.url, publicUrl: cloudResult.publicUrl, fileId: cloudResult.fileId };
+  }));
+
+  // Build the variants map. Use the first platform's aspect as "primary" so
+  // image_url / drive_url stay populated with the most-relevant render
+  // (legacy clients and one-platform publishes keep working unchanged).
+  // NB: function arg `variants` is the orchestrator's caption-variant count,
+  // unrelated to image-aspect variants — keep the names distinct.
+  const imageVariantMap = {};
+  for (const r of renders) imageVariantMap[r.aspect] = r.publicUrl;
+
+  const primaryAspect = aspectOf(platforms[0]);
+  const primary = renders.find((r) => r.aspect === primaryAspect) || renders[0];
+  const imageVariantsJson = renders.length > 1 ? JSON.stringify(imageVariantMap) : null;
 
   // 4. Persist — UPDATE the placeholder row when the route created one
   // up-front (async-job pattern), otherwise INSERT a fresh row.
@@ -68,11 +91,13 @@ async function generateAndSavePost({
     prepare(`
       UPDATE posts
          SET caption = ?, hashtags = ?, image_url = ?, drive_url = ?, drive_file_id = ?,
+             image_variants = ?,
              status = ?, quality_score = ?, quality_report = ?,
              brand_id = COALESCE(?, brand_id), updated_at = datetime('now')
        WHERE id = ? AND org_id = ?
     `).run(
-      content.caption, hashtags, image.url, cloudResult.publicUrl, cloudResult.fileId,
+      content.caption, hashtags, primary.rawUrl, primary.publicUrl, primary.fileId,
+      imageVariantsJson,
       initialStatus,
       quality ? quality.score : null,
       quality ? JSON.stringify(quality) : null,
@@ -82,16 +107,17 @@ async function generateAndSavePost({
   } else {
     prepare(`
       INSERT INTO posts
-        (id, org_id, user_id, prompt, caption, hashtags, image_url, drive_url, drive_file_id, platforms, status, quality_score, quality_report, brand_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, org_id, user_id, prompt, caption, hashtags, image_url, drive_url, drive_file_id, platforms, status, quality_score, quality_report, brand_id, image_variants)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, orgId, userId, prompt, content.caption, hashtags,
-      image.url, cloudResult.publicUrl, cloudResult.fileId,
+      primary.rawUrl, primary.publicUrl, primary.fileId,
       JSON.stringify(platforms),
       initialStatus,
       quality ? quality.score : null,
       quality ? JSON.stringify(quality) : null,
       brand ? brand.id : null,
+      imageVariantsJson,
     );
   }
 

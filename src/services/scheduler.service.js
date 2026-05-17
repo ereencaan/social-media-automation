@@ -6,6 +6,7 @@ const { postToLinkedIn } = require('./linkedin.service');
 const { postToTikTok } = require('./tiktok.service');
 const { postToYouTube } = require('./youtube.service');
 const { generateAndSavePost } = require('./post-factory.service');
+const { getMediaUrlFor } = require('../utils/platform-aspect');
 
 // ---- Plan item automation windows ---------------------------------------
 // Start generating a plan item's media this many hours before its scheduled
@@ -20,28 +21,34 @@ const PLAN_GEN_CONCURRENCY = 2;
 
 const activeJobs = new Map();
 
+// Each poster calls getMediaUrlFor(post, platform) so multi-aspect posts
+// (e.g. IG + TikTok on the same post) get their own properly-proportioned
+// render instead of one shared image. Single-aspect posts fall through to
+// drive_url unchanged (the helper returns drive_url when image_variants
+// is null).
 const platformPosters = {
   instagram: (post) => {
     const caption = `${post.caption}\n\n${post.hashtags}`;
-    return postToInstagram(post.drive_url, caption, { orgId: post.org_id });
+    return postToInstagram(getMediaUrlFor(post, 'instagram'), caption, { orgId: post.org_id });
   },
   facebook: (post) => {
     const message = `${post.caption}\n\n${post.hashtags}`;
-    return postToFacebook(post.drive_url, message, { orgId: post.org_id });
+    return postToFacebook(getMediaUrlFor(post, 'facebook'), message, { orgId: post.org_id });
   },
   linkedin: (post) => {
-    return postToLinkedIn(post.drive_url, post.caption, { orgId: post.org_id });
+    return postToLinkedIn(getMediaUrlFor(post, 'linkedin'), post.caption, { orgId: post.org_id });
   },
-  // P4 Phase 2.5d — short-form video platforms. Both pull the public
-  // media URL from drive_url (Cloudinary CDN) since that's the version
-  // TikTok / YouTube can fetch over the open internet. Captions on
-  // TikTok Inbox mode aren't accepted (creator types those in the
-  // app); YouTube uses the post's caption + hashtags via buildSnippet.
+  // P4 Phase 2.5d — short-form video platforms. For video posts, drive_url
+  // is the rendered mp4 (no aspect variants — video composer handles
+  // sizing). For image-only posts targeting TikTok/YT alongside IG, the
+  // helper returns the vertical variant. Captions on TikTok Inbox mode
+  // aren't accepted (creator types those in the app); YouTube uses the
+  // post's caption + hashtags via buildSnippet.
   tiktok: (post) => {
-    return postToTikTok(post.drive_url || post.image_url, { orgId: post.org_id });
+    return postToTikTok(getMediaUrlFor(post, 'tiktok'), { orgId: post.org_id });
   },
   youtube_shorts: (post) => {
-    return postToYouTube(post, post.drive_url || post.image_url, {
+    return postToYouTube(post, getMediaUrlFor(post, 'youtube_shorts'), {
       orgId: post.org_id,
       // Cron-driven schedule: default to public so the auto-published
       // Short actually goes live. Manual publish from the UI keeps the

@@ -309,6 +309,14 @@ async function init() {
     // a backfill, and the posts.routes generator now stamps brand_id
     // explicitly when one is selected on the form.
     ['brand_id',       'TEXT'],
+    // Per-platform render variants. JSON: { square: url, landscape: url,
+    // vertical: url }. When a post targets multiple platforms with
+    // different aspect ratios (IG square + TikTok vertical) we render
+    // one image per distinct aspect group and stash the URLs here so
+    // each publisher can pick the right one. NULL on older posts and
+    // single-aspect posts — publishers fall back to `image_url` /
+    // `drive_url` in that case.
+    ['image_variants', 'TEXT'],
   ];
   for (const [name, type] of wantedPostCols) {
     if (!existingPostCols.has(name)) {
