@@ -3,6 +3,13 @@
 //
 // Run:   node scripts/smoke.js [orgId]
 //
+// We load .env explicitly because this script is invoked outside the
+// systemd unit, so the env vars the main process inherits aren't set
+// automatically. The path matches src/app.js.
+
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '..', '.env'), override: true });
+//
 // Exercises the same code paths the HTTP routes use but bypasses session
 // auth so we don't need a logged-in cookie. AI-cost paths (Claude lead
 // email draft, Flux image gen) are deliberately skipped — those have
@@ -19,6 +26,7 @@
 // running them automatically would publish to real customer accounts.
 
 const crypto = require('crypto');
+// (dotenv already loaded at the top of the file)
 
 const TESTS = [];
 function test(name, fn) { TESTS.push({ name, fn }); }
