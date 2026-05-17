@@ -32,6 +32,28 @@ router.post('/intake/token/rotate', (req, res) => {
   }
 });
 
+// Per-org Tawk webhook signing secret. Surfaced separately from the
+// intake token because rotating the secret only invalidates Tawk, not
+// the generic intake URL or the email-to-lead address. The user pastes
+// this value into Tawk dashboard → Webhooks → Secret Key.
+router.get('/intake/tawk/secret', (req, res) => {
+  try {
+    const secret = intake.getOrCreateTawkSecret(req.user.orgId);
+    res.json({ secret });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/intake/tawk/secret/rotate', (req, res) => {
+  try {
+    const secret = intake.regenerateTawkSecret(req.user.orgId);
+    res.json({ secret });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // Single token, multiple intake surfaces. The frontend Settings page
 // renders one card per surface so the user can copy whichever URL or
 // address they need without ever seeing a different token. Rotating

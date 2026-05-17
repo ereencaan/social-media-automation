@@ -33,17 +33,29 @@ const intakeLimiter = rateLimit({
 });
 
 // Tawk signs each webhook with HMAC-SHA1(rawBody, webhookSecret) hex in
-// the X-Tawk-Signature header. The secret is set per-webhook in the Tawk
-// dashboard. We accept TAWK_WEBHOOK_SECRET as a single-tenant env var for
-// now; per-org secrets can come later when we land multi-tenant config.
-// If no secret is configured, signatures are not enforced — fine for the
-// first-run / dogfood phase, but log a warning so we don't forget.
+// the X-Tawk-Signature header. The secret is per-webhook (set in the
+// Tawk dashboard when adding the webhook).
+//
+// Resolution order, most-to-least scoped:
+//   1. org.tawk_webhook_secret — per-tenant secret rotated from Settings
+//   2. process.env.TAWK_WEBHOOK_SECRET — single-tenant fallback so the
+//      Hitratech dogfood install keeps working until we re-key it
+//   3. Neither set → accept (warn) so first-run users aren't blocked
+//      before they've configured anything
+//
+// A signature failure at step 1 does NOT fall through to step 2 — once
+// the org has a real per-tenant secret, that's the only thing we'll
+// accept (otherwise a stale env var would let unauthenticated webhooks
+// through for a customer who'd already rotated their secret).
 let warnedTawkNoSecret = false;
-function verifyTawkSignature(req) {
-  const secret = process.env.TAWK_WEBHOOK_SECRET;
+function verifyTawkSignature(req, org) {
+  const orgSecret = org?.tawk_webhook_secret || null;
+  const envSecret = process.env.TAWK_WEBHOOK_SECRET || null;
+  const secret = orgSecret || envSecret;
+
   if (!secret) {
     if (!warnedTawkNoSecret) {
-      console.warn('[TawkWebhook] TAWK_WEBHOOK_SECRET not set — accepting unsigned webhooks');
+      console.warn('[TawkWebhook] no per-org secret + no TAWK_WEBHOOK_SECRET — accepting unsigned webhooks (configure from Settings → Tawk to enforce)');
       warnedTawkNoSecret = true;
     }
     return true;
@@ -161,7 +173,10 @@ router.post('/tawk/:token', intakeLimiter, (req, res) => {
   try {
     const org = intake.getOrgByToken(req.params.token);
     if (!org) return res.status(404).json({ error: 'Invalid intake token' });
-    if (!verifyTawkSignature(req)) {
+    // verifyTawkSignature uses org.tawk_webhook_secret when set, else
+    // falls back to the env var. getOrgByToken already returns the full
+    // org row so the secret is available without a second lookup.
+    if (!verifyTawkSignature(req, org)) {
       return res.status(401).json({ error: 'Invalid signature' });
     }
     const lead = intake.ingestTawk(org.id, req.body || {});

@@ -21,7 +21,10 @@ function generateToken() {
 
 function getOrgByToken(token) {
   if (!token || typeof token !== 'string') return null;
-  return prepare('SELECT id, name FROM orgs WHERE intake_token = ?').get(token);
+  // Return the full set of fields the intake route needs to authenticate
+  // and route the payload. Includes tawk_webhook_secret so verifyTawk
+  // signature checks don't need a second round-trip.
+  return prepare('SELECT id, name, tawk_webhook_secret FROM orgs WHERE intake_token = ?').get(token);
 }
 
 function getOrCreateToken(orgId) {
@@ -37,6 +40,33 @@ function regenerateToken(orgId) {
   const token = generateToken();
   prepare('UPDATE orgs SET intake_token = ? WHERE id = ?').run(token, orgId);
   return token;
+}
+
+/**
+ * Per-org Tawk webhook secret. Generated lazily on first reveal so we
+ * don't pay the entropy cost for orgs that never connect Tawk. Callers
+ * should pass the returned value to the customer to paste into the
+ * "Secret Key" field on the Tawk dashboard's webhook page.
+ */
+function getOrCreateTawkSecret(orgId) {
+  const row = prepare('SELECT tawk_webhook_secret FROM orgs WHERE id = ?').get(orgId);
+  if (!row) throw new Error('Org not found');
+  if (row.tawk_webhook_secret) return row.tawk_webhook_secret;
+  const secret = generateToken();
+  prepare('UPDATE orgs SET tawk_webhook_secret = ? WHERE id = ?').run(secret, orgId);
+  return secret;
+}
+
+function regenerateTawkSecret(orgId) {
+  const secret = generateToken();
+  prepare('UPDATE orgs SET tawk_webhook_secret = ? WHERE id = ?').run(secret, orgId);
+  return secret;
+}
+
+/** Internal — used by the intake route to look up the org's signing secret. */
+function getTawkSecret(orgId) {
+  const row = prepare('SELECT tawk_webhook_secret FROM orgs WHERE id = ?').get(orgId);
+  return row?.tawk_webhook_secret || null;
 }
 
 // ---- payload normalization ---------------------------------------------
@@ -249,6 +279,7 @@ function ingestEmail(orgId, parsed = {}) {
 
 module.exports = {
   getOrgByToken, getOrCreateToken, regenerateToken,
+  getOrCreateTawkSecret, regenerateTawkSecret, getTawkSecret,
   normalizePayload, canonicalSource, ingest, ingestTawk, ingestEmail,
   SOURCE_ALIASES,
 };

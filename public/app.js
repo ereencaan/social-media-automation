@@ -3427,9 +3427,39 @@ VIEWS.settings = async function settingsView(root, myGen) {
       }, 'Rotate token'),
     ));
 
-    // ---- Card 2: Tawk.to webhook URL ----
+    // ---- Card 2: Tawk.to webhook URL + per-org secret ----
     tawkBody.innerHTML = '';
     tawkBody.appendChild(intakeRevealRow('Tawk webhook URL', info.tawkUrl, 'Tawk URL copied'));
+
+    // Per-org signing secret. Lazy-fetched: only generate when the user
+    // expands the card (avoids minting secrets for orgs that never use
+    // Tawk). Render an inline placeholder while we fetch.
+    const tawkSecretSlot = el('div', { style: 'margin-top:10px' });
+    tawkBody.appendChild(tawkSecretSlot);
+
+    (async () => {
+      try {
+        const { secret } = await api('/api/leads/intake/tawk/secret');
+        if (stale(myGen)) return;
+        tawkSecretSlot.innerHTML = '';
+        tawkSecretSlot.appendChild(intakeRevealRow('Tawk webhook secret', secret, 'Secret copied'));
+        tawkSecretSlot.appendChild(el('div', { class: 'form-actions', style: 'margin-top:10px' },
+          el('button', {
+            class: 'btn btn-danger btn-sm',
+            onclick: async () => {
+              if (!confirm('Rotate your Tawk webhook secret?\n\nAfter rotating, paste the new secret into Tawk dashboard → Webhooks → Secret Key. Until you do, Tawk webhooks will fail signature verification and no chat leads will land. Your intake URL and email-to-lead address are unaffected.')) return;
+              try {
+                await api('/api/leads/intake/tawk/secret/rotate', { method: 'POST' });
+                toast('Tawk secret rotated', 'success');
+                loadIntake();
+              } catch (e) { toast(e.message, 'error'); }
+            },
+          }, 'Rotate Tawk secret'),
+        ));
+      } catch (e) {
+        tawkSecretSlot.innerHTML = `<div class="auth-error show">${e.message}</div>`;
+      }
+    })();
 
     tawkBody.appendChild(el('details', { class: 'intake-details', style: 'margin-top:14px' },
       el('summary', {}, 'Connect Tawk in 5 minutes'),
@@ -3439,7 +3469,7 @@ VIEWS.settings = async function settingsView(root, myGen) {
         el('div', {}, '3. Administration → Webhooks → + Add Webhook'),
         el('div', {}, '4. Paste the URL above as Endpoint URL'),
         el('div', {}, '5. Tick events: Chat Start, Chat Transcript, New Ticket'),
-        el('div', {}, '6. Save → copy Tawk\'s Secret Key → set TAWK_WEBHOOK_SECRET on your server'),
+        el('div', {}, '6. Paste the Tawk webhook secret above into Tawk\'s "Secret Key" field, then Save'),
         el('div', { style: 'margin-top:6px; color:var(--text-mute); font-size:12px' },
           'Anonymous chats (no name/email/phone) are silently dropped so the kanban stays clean.'),
       ),

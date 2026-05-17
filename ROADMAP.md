@@ -143,7 +143,7 @@
 - [x] Anonymous-visitor filter (skip Tawk auto-names like "Visitor 1234567890")
 - [x] Hitratech.co.uk: Tidio swapped for Tawk (dogfood)
 - [x] Settings → "Connect Tawk in 5 minutes" reveal card (URL + copy + 6-step guide)
-- [ ] Per-org webhook secret (replace single env var when multi-tenant lands)
+- [x] Per-org webhook secret — `orgs.tawk_webhook_secret` column + lazy-create + rotate from Settings → Tawk card. Verification falls back to `TAWK_WEBHOOK_SECRET` env var when the org hasn't set one (so existing Hitratech install keeps working until we re-key it). Once an org has set its own secret, the env var fallback is NOT honoured for that tenant — preventing a stale shared env var from letting unauth'd webhooks through after a customer rotates.
 
 ### Live chat — Tidio
 > **Free tier blocks "Send Webhook" action (Plus required).** For free Tidio

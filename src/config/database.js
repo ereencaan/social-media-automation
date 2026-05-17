@@ -67,6 +67,21 @@ async function init() {
     db.run(`CREATE UNIQUE INDEX IF NOT EXISTS uq_orgs_intake_token ON orgs(intake_token) WHERE intake_token IS NOT NULL`);
   }
 
+  // Per-org Tawk webhook secret. Tawk sets a Secret Key per webhook in
+  // its dashboard, then HMAC-signs every payload it sends us. Until
+  // multi-tenant landed we shared a single TAWK_WEBHOOK_SECRET env var
+  // across every customer — fine for dogfood, broken for SaaS (every
+  // customer's webhook would have to be configured with OUR secret,
+  // and a leak in one tenant burns all of them).
+  //
+  // Per-org secret: generated lazily on first reveal from Settings →
+  // Tawk card, rotatable from the same screen. The intake route still
+  // honours the env var as a fallback so existing Hitratech setup
+  // keeps working until we re-key it.
+  if (!existingOrgCols.has('tawk_webhook_secret')) {
+    db.run(`ALTER TABLE orgs ADD COLUMN tawk_webhook_secret TEXT`);
+  }
+
   // P1 billing columns. plan_status mirrors Stripe subscription state so the
   // app can show "past_due" banners without round-tripping to Stripe on every
   // request. trial_ends_at is set at signup time even if the user hasn't
