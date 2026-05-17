@@ -121,9 +121,66 @@ async function sendPasswordResetEmail({ to, name, token }) {
   return send({ to, subject: 'Reset your Hitrapost password', html, text });
 }
 
+/**
+ * 3-day trial reminder. Stripe fires `customer.subscription.trial_will_end`
+ * exactly once 72h before trial end. The CTA points at /settings#billing
+ * (Customer Portal) so the user can confirm their card without leaving us.
+ *
+ * `trialEndsAt` is a Date or ISO string — we just format the day for the
+ * subject line; the body says "in 3 days" since that's what Stripe sends on.
+ */
+async function sendTrialEndingEmail({ to, name, planName, trialEndsAt }) {
+  const greeting = name ? `Hi ${name},` : 'Hi,';
+  const billingLink = publicUrl('/#settings');
+  const endsLabel = trialEndsAt
+    ? new Date(trialEndsAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+    : 'in 3 days';
+  const html = emailLayout(`
+    <p>${greeting}</p>
+    <p>Your Hitrapost <strong>${planName || 'trial'}</strong> ends on <strong>${endsLabel}</strong>.</p>
+    <p>To keep generating posts and capturing leads without interruption, make sure your card on file is up to date — we'll charge it automatically when the trial ends. If you'd rather cancel, you can do that from the same screen and you won't be billed.</p>
+    <p style="margin:24px 0">
+      <a href="${billingLink}"
+         style="display:inline-block;background:#6366f1;color:white;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600">
+        Manage billing
+      </a>
+    </p>
+    <p style="font-size:13px;color:#6b7185">Questions? Reply to this email or contact <a href="mailto:billing@hitrapost.co.uk" style="color:#6366f1">billing@hitrapost.co.uk</a>.</p>
+  `);
+  const text = `${greeting}\n\nYour Hitrapost ${planName || 'trial'} ends on ${endsLabel}.\n\nManage billing: ${billingLink}\n\nQuestions? Reply or email billing@hitrapost.co.uk.`;
+  return send({ to, subject: `Your Hitrapost trial ends ${endsLabel}`, html, text });
+}
+
+/**
+ * Stripe's `invoice.payment_failed` reminder. The first failure usually
+ * means an expired card or insufficient funds — Stripe will retry the
+ * charge a few more times, but the user is the only one who can fix it.
+ */
+async function sendPaymentFailedEmail({ to, name, amountFormatted, hostedInvoiceUrl }) {
+  const greeting = name ? `Hi ${name},` : 'Hi,';
+  const billingLink = publicUrl('/#settings');
+  const amountLine = amountFormatted ? `<strong>${amountFormatted}</strong>` : 'your most recent invoice';
+  const html = emailLayout(`
+    <p>${greeting}</p>
+    <p>We couldn't charge your card for ${amountLine}. Stripe will try again automatically, but the fastest fix is to update your payment method.</p>
+    <p style="margin:24px 0">
+      <a href="${billingLink}"
+         style="display:inline-block;background:#6366f1;color:white;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600">
+        Update payment method
+      </a>
+    </p>
+    ${hostedInvoiceUrl ? `<p style="font-size:13px;color:#6b7185">Or pay the open invoice directly: <a href="${hostedInvoiceUrl}" style="color:#6366f1">view invoice</a></p>` : ''}
+    <p style="font-size:13px;color:#6b7185">If the card stays unpaid, your account moves to "past due" and posting / lead capture pause. Questions: <a href="mailto:billing@hitrapost.co.uk" style="color:#6366f1">billing@hitrapost.co.uk</a>.</p>
+  `);
+  const text = `${greeting}\n\nWe couldn't charge your card for ${amountFormatted || 'your most recent invoice'}.\n\nUpdate payment method: ${billingLink}\n${hostedInvoiceUrl ? `\nOpen invoice: ${hostedInvoiceUrl}\n` : ''}\nIf unpaid, account moves to past_due. Questions: billing@hitrapost.co.uk.`;
+  return send({ to, subject: 'Payment failed on your Hitrapost subscription', html, text });
+}
+
 module.exports = {
   isConfigured,
   send,
   sendVerificationEmail,
   sendPasswordResetEmail,
+  sendTrialEndingEmail,
+  sendPaymentFailedEmail,
 };

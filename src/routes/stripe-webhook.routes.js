@@ -14,7 +14,8 @@ const router = express.Router();
 const { prepare } = require('../config/database');
 const stripeService = require('../services/stripe.service');
 const billing = require('../services/billing.service');
-const { planForPriceId } = require('../config/plans');
+const { planForPriceId, getPlan } = require('../config/plans');
+const emailService = require('../services/email.service');
 
 router.post('/', async (req, res) => {
   const sig = req.get('stripe-signature');
@@ -156,13 +157,73 @@ async function handlePaymentFailed(invoice) {
   const org = orgFromCustomer(invoice.customer);
   if (!org) return;
   billing.markPastDue(org.id);
-  // TODO: send "payment failed, update card" email once email.service is wired.
+
+  // Email the org owner so they can update their card. Failure to email
+  // must never break the webhook ack — the DB state is the source of
+  // truth and a missed email is recoverable.
+  const owner = ownerOfOrg(org.id);
+  if (owner?.email) {
+    try {
+      await emailService.sendPaymentFailedEmail({
+        to: owner.email,
+        name: owner.name,
+        amountFormatted: formatStripeMoney(invoice.amount_due, invoice.currency),
+        hostedInvoiceUrl: invoice.hosted_invoice_url || null,
+      });
+    } catch (err) {
+      console.warn('[stripe-webhook] payment_failed email send failed:', err.message);
+    }
+  }
 }
 
-async function handleTrialWillEnd(_sub) {
-  // 3 days before trial ends. Email reminder lands here once email.service
-  // is wired. For now we just log so we know the event is flowing.
-  console.log('[stripe-webhook] trial_will_end — email reminder TBD');
+async function handleTrialWillEnd(sub) {
+  // Stripe fires this once, ~72h before trial ends. Email the owner with
+  // a link to manage billing / confirm payment method.
+  const org = orgFromCustomer(sub.customer);
+  if (!org) {
+    console.warn('[stripe-webhook] trial_will_end: no org for customer', sub.customer);
+    return;
+  }
+  const owner = ownerOfOrg(org.id);
+  if (!owner?.email) {
+    console.warn('[stripe-webhook] trial_will_end: no owner email for org', org.id);
+    return;
+  }
+
+  const priceId = sub.items?.data?.[0]?.price?.id;
+  const planId = planForPriceId(priceId);
+  const planName = planId ? getPlan(planId).name : null;
+  const trialEndsAt = sub.trial_end ? new Date(sub.trial_end * 1000) : null;
+
+  try {
+    await emailService.sendTrialEndingEmail({
+      to: owner.email,
+      name: owner.name,
+      planName,
+      trialEndsAt,
+    });
+  } catch (err) {
+    console.warn('[stripe-webhook] trial_will_end email send failed:', err.message);
+  }
+}
+
+// ---- helpers --------------------------------------------------------------
+
+function ownerOfOrg(orgId) {
+  return prepare("SELECT email, name FROM users WHERE org_id = ? AND role = 'owner' LIMIT 1").get(orgId);
+}
+
+/** Stripe amounts are in minor units (pence/cents). 1999 GBP → "£19.99". */
+function formatStripeMoney(amount, currency) {
+  if (amount == null) return null;
+  try {
+    return new Intl.NumberFormat('en-GB', {
+      style: 'currency',
+      currency: (currency || 'gbp').toUpperCase(),
+    }).format(amount / 100);
+  } catch {
+    return `${(amount / 100).toFixed(2)} ${(currency || 'GBP').toUpperCase()}`;
+  }
 }
 
 module.exports = router;

@@ -73,11 +73,9 @@
   - [x] `support@hitrapost.co.uk` (general user support)
   - [x] `info@hitrapost.co.uk` (general inbound, used as `EMAIL_FROM`)
   - [x] `hello@hitrapost.co.uk` (general inbound)
-- [ ] **Outbound replies** — currently we can only RECEIVE on these aliases. To reply *from* `support@hitrapost.co.uk` to a customer, options:
-  - **Cheap**: Gmail "Send mail as" with SendGrid SMTP relay (free; needs Resend/SendGrid SPF)
-  - **Clean**: Google Workspace £6/user/mo (proper inbox per alias, calendar, drive)
-  - Decision deferred until first real customer ticket arrives
-- [ ] Once outbound is wired, send a test from `support@` to verify SPF/DKIM align so replies don't land in spam
+- [x] **Outbound replies — setup documented** in `docs/OUTBOUND_MAIL.md`. Route: Resend SMTP relay (`smtp.resend.com:587`, username `resend`, password = `RESEND_API_KEY`) wired into Gmail "Send mail as" per alias. £0/mo, replies go out signed by `hitrapost.co.uk` SPF + DKIM. User-side Gmail config takes ~10 min per alias (no code change; existing Resend setup carries it).
+- [ ] User to run the 10-min Gmail config for `support@hitrapost.co.uk` (and any additional aliases as volume warrants)
+- [ ] Send a test from `support@` after config to verify SPF/DKIM align so replies don't land in spam
 
 ### Backend
 - [x] DB migration: `orgs.plan`, `plan_status`, `trial_ends_at`, `stripe_customer_id`, `stripe_subscription_id`
@@ -91,7 +89,8 @@
   - [x] `customer.subscription.created/updated/deleted` → DB sync
   - [x] `invoice.paid` → reset quotas, mark active
   - [x] `invoice.payment_failed` → mark `past_due`, notify
-  - [~] `customer.subscription.trial_will_end` → email reminder (handler in place; email send TBD)
+  - [x] `customer.subscription.trial_will_end` → email reminder (owner gets 72h-before "manage billing" mail; CTA links to Customer Portal)
+  - [x] `invoice.payment_failed` → owner gets "update payment method" mail with optional hosted invoice link
 
 ### Frontend
 - [x] `/pricing` page (4 plan cards, monthly/annual toggle)
@@ -254,14 +253,17 @@
 
 ## P5 — Video pipeline (real reels)
 
-- [ ] `video-composer.service.js` — storyboard + multi-clip + ffmpeg concat
-- [ ] Claude storyboard prompt (N scenes from brief)
-- [ ] Parallel Runway clip generation
-- [ ] ffmpeg crossfade concat (0.5s transitions)
-- [ ] Cloudinary upload of final video
-- [ ] Posts UI: target duration select (Reel 15s / TikTok 30s / Shorts 60s)
-- [ ] Progress UI: "Scene 2/3 generating…"
-- [ ] Plan-tier gating (Starter: 0 video, Pro: 5/mo, Agency: 50/mo)
+- [x] `video-composer.service.js` — storyboard + parallel Runway + ffmpeg xfade concat (commit `2aba49e`)
+- [x] Claude storyboard prompt (N scenes from brief, no in-scene text/logos/people)
+- [x] Parallel Runway clip generation (concurrency cap 4)
+- [x] ffmpeg crossfade concat (0.5s xfade transitions)
+- [x] Cloudinary upload of final video (existing single-clip path reused)
+- [x] Posts UI: duration select 5/10/15/30/60 (5–10 single-clip, 15+ multi-clip reel)
+- [x] Plan-tier gating — `video_max_seconds` per tier (Free/Starter 0, Pro 30, Agency 60, Enterprise -1); 402 with `{cap,requested}` on overflow
+- [x] Async-job pattern (202 + post.id, setImmediate work, frontend polls) — eliminates Cloudflare 524 on long renders
+- [x] Video thumbnail (`<video muted autoplay loop>` instead of broken `<img src=mp4>`)
+- [x] ffmpeg verified on prod VM (4.4.2, xfade filter available)
+- [ ] Progress UI: "Scene 2/3 generating…" (currently just "generating" placeholder card; per-scene progress would need a job-state subdoc)
 - [ ] Alternative provider plugins (Pika, Luma, Veo, Sora)
 
 ---
